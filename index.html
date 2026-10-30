@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f5c52" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="إدارة المركز" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>منظومة إدارة المركز</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="icon" href="icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="config.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <!-- شاشة الدخول -->
+  <section id="login-view" class="login-view" hidden>
+    <div class="login-card">
+      <div class="login-logo">📖</div>
+      <h1 id="login-title">منظومة إدارة المركز</h1>
+      <p class="muted">تسجيل دخول الإداريات</p>
+      <div id="setup-notice" class="notice warn" hidden>
+        لم يتم ضبط رابط الخادم بعد. افتحي ملف <b>config.js</b> وضعي رابط تطبيق الويب في <b>API_URL</b>.
+      </div>
+      <form id="login-form" autocomplete="on">
+        <label class="field"><span>الإدارية</span>
+          <select name="username" id="login-user" required><option value="">جاري التحميل...</option></select>
+        </label>
+        <label class="field"><span>كلمة المرور</span>
+          <input type="password" name="password" id="login-pass" autocomplete="current-password" required />
+        </label>
+        <div id="login-error" class="form-error" hidden></div>
+        <button class="btn primary block lg" type="submit" id="login-btn">دخول</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- التطبيق -->
+  <div id="main-view" class="app" hidden>
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-logo">📖</span><div><b id="brand-name">إدارة المركز</b><small id="brand-user"></small></div></div>
+      <nav id="side-nav" class="side-nav"></nav>
+      <button class="btn ghost block" data-action="logout">🚪 تسجيل الخروج</button>
+    </aside>
+    <div class="content">
+      <header class="topbar">
+        <h2 id="page-title">الرئيسية</h2>
+        <div class="topbar-actions">
+          <span id="sync" class="sync" title="حالة المزامنة"><i></i><small id="sync-text">متزامن</small></span>
+          <button class="icon-btn" data-action="refresh" title="تحديث البيانات">⟳</button>
+        </div>
+      </header>
+      <main id="page" class="page"></main>
+    </div>
+    <nav id="bottom-nav" class="bottom-nav"></nav>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root"></div>
+  <div id="print-area"></div>
+  <noscript>يجب تفعيل JavaScript لتشغيل المنظومة.</noscript>
+</body>
+</html>
