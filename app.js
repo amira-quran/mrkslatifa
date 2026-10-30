@@ -18,7 +18,7 @@ const addMonths = (m, k) => { let [y, mm] = m.split('-').map(Number); mm += k; w
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 const ES = { ACTIVE: 'نشط', MOVED: 'منقول', ENDED: 'منتهي', SUSPENDED: 'موقوف' };
 const STATUS_LABEL = { paid: 'مسددة', unpaid: 'غير مسددة', partial: 'مسددة جزئياً', exempt: 'معفاة/مكفولة', none: 'بدون حلقة', archived: 'مؤرشفة' };
-const FIELD_LABELS = { name: 'الاسم', nationalId: 'الرقم الشخصي', phone: 'الهاتف', phone2: 'هاتف إضافي', familyKey: 'رمز الأسرة', feeStatus: 'حالة الرسوم', notes: 'ملاحظات', status: 'الحالة', teacher: 'المعلمة', program: 'البرنامج', days: 'الأيام', period: 'الفترة', time: 'الوقت', capacity: 'السعة', amount: 'المبلغ', fromMonth: 'من شهر', toMonth: 'إلى شهر', type: 'النوع', groupId: 'الحلقة', studentId: 'الطالبة', studentIds: 'الطالبات', enrollmentId: 'التسجيل', paidDate: 'تاريخ الدفع', method: 'طريقة الدفع', cancelReason: 'سبب الإلغاء', startDate: 'البداية', endDate: 'الانتهاء', value: 'القيمة', version: 'الإصدار', updatedAt: 'آخر تعديل', updatedBy: 'عدّلتها', createdAt: 'أُضيفت', createdBy: 'أضافتها', id: 'الرمز', oldId: 'الرقم القديم' };
+const FIELD_LABELS = { name: 'الاسم', nationalId: 'اسم المستخدم', phone: 'الهاتف', phone2: 'هاتف إضافي', familyKey: 'رمز الأسرة', feeStatus: 'حالة الرسوم', notes: 'ملاحظات', status: 'الحالة', teacher: 'المعلمة', program: 'البرنامج', days: 'الأيام', period: 'الفترة', time: 'الوقت', capacity: 'السعة', amount: 'المبلغ', fromMonth: 'من شهر', toMonth: 'إلى شهر', type: 'النوع', groupId: 'الحلقة', studentId: 'الطالبة', studentIds: 'الطالبات', enrollmentId: 'التسجيل', paidDate: 'تاريخ الدفع', method: 'طريقة الدفع', cancelReason: 'سبب الإلغاء', startDate: 'البداية', endDate: 'الانتهاء', value: 'القيمة', version: 'الإصدار', updatedAt: 'آخر تعديل', updatedBy: 'عدّلتها', createdAt: 'أُضيفت', createdBy: 'أضافتها', id: 'الرمز', oldId: 'الرقم القديم' };
 
 const S = { token: null, user: null, data: null, stamp: null, month: null, idx: {}, route: 'dashboard', busy: 0, charts: [], modals: [], pendingRefresh: false,
   f: { q: '', teacher: '', program: '', days: '', period: '', pay: '', status: 'نشطة' }, gf: { teacher: '', period: '' }, auditOffset: 0 };
@@ -68,7 +68,23 @@ function buildIndex() {
 }
 const activeEnr = (sid) => (S.idx.enrBySt[sid] || []).filter((e) => e.status === ES.ACTIVE);
 const groupActiveEnr = (gid) => (S.idx.enrByGr[gid] || []).filter((e) => e.status === ES.ACTIVE && S.idx.st[e.studentId] && S.idx.st[e.studentId].status === 'نشطة');
-const groupName = (g) => (g ? g.teacher + ' — ' + g.program : '—');
+// الحلقة = معلمة + أيام + فترة، وبرنامج كل طالبة محفوظ في تسجيلها (e.program)، وبرنامج الحلقة هو الافتراضي فقط
+const enrProg = (e) => (e && e.program) || ((e && S.idx.gr[e.groupId]) || {}).program || '';
+const groupProgs = (g) => { if (!g) return []; const c = {}; groupActiveEnr(g.id).forEach((e) => { const p = enrProg(e); c[p] = (c[p] || 0) + 1; }); const k = Object.keys(c).sort((a, b) => a.localeCompare(b, 'ar')); return k.length ? k.map((p) => ({ p, n: c[p] })) : [{ p: g.program, n: 0 }]; };
+const groupTitle = (g) => groupProgs(g).map((x) => x.p).join(' + ');
+const groupProgsText = (g) => groupProgs(g).map((x) => x.p + ' (' + x.n + ')').join(' · ');
+const groupName = (g) => (g ? g.teacher + ' — ' + groupTitle(g) : '—');
+const enrName = (e) => { const g = e && S.idx.gr[e.groupId]; return g ? g.teacher + ' — ' + enrProg(e) : '—'; };
+const progList = () => `<datalist id="dl-progs">${(S.data.lists.programs || []).map((v) => `<option value="${esc(v)}">`).join('')}</datalist>`;
+const slotKey = (g) => [String(g.teacher).trim(), String(g.days).trim(), g.period].join('|');
+function sameSlotClusters() { const c = {}; activeGroups().forEach((g) => { (c[slotKey(g)] = c[slotKey(g)] || []).push(g); }); return Object.values(c).filter((x) => x.length > 1); }
+/** تغيير برنامج طالبة داخل حلقتها */
+async function changeProgram(e, after) {
+  const s = S.idx.st[e.studentId];
+  const m = openModal({ title: 'برنامج ' + esc(s ? s.name : ''), body: `<label class="field"><span>البرنامج</span><input id="cp-p" list="dl-progs" value="${esc(enrProg(e))}"/></label>${progList()}<div class="notice info small">يتغير البرنامج فقط، وتبقى الطالبة في نفس الحلقة.</div>`,
+    foot: '<button class="btn primary" id="cp-save">حفظ</button><button class="btn" data-close>إلغاء</button>',
+    onMount: (el) => { $('#cp-save', el).onclick = async () => { const v = $('#cp-p', el).value.trim(); if (!v) return toast('اكتبي البرنامج', 'warn'); try { await mutate($('#cp-save', el), 'setEnrollmentProgram', { enrollmentId: e.id, version: e.version, program: v }, 'تم تغيير البرنامج ✅'); m.close(); after && after(); } catch (x) {} }; } });
+}
 const groupWhen = (g) => (g ? g.days + ' · ' + g.period : '');
 const activeGroups = () => S.data.groups.filter((g) => g.status === 'فعالة');
 const settings = () => S.data.settings || {};
@@ -188,7 +204,7 @@ async function mutate(btn, action, payload, okMsg) {
 }
 const optList = (arr, sel, ph) => (ph != null ? `<option value="">${esc(ph)}</option>` : '') + arr.map((v) => { const val = typeof v === 'object' ? v.v : v, lab = typeof v === 'object' ? v.l : v; return `<option value="${esc(val)}" ${String(val) === String(sel) ? 'selected' : ''}>${esc(lab)}</option>`; }).join('');
 const monthOptions = (sel) => { const base = S.data.thisMonth; const arr = []; for (let k = -12; k <= 8; k++) { const m = addMonths(base, k); arr.push({ v: m, l: monthLabel(m) }); } if (sel && !arr.some((x) => x.v === sel)) arr.push({ v: sel, l: monthLabel(sel) }); arr.sort((a, b) => (a.v < b.v ? -1 : 1)); return optList(arr, sel); };
-const groupOptions = (sel, excludeIds) => optList(activeGroups().filter((g) => !(excludeIds || []).includes(g.id)).sort((a, b) => (a.teacher + a.program).localeCompare(b.teacher + b.program, 'ar')).map((g) => ({ v: g.id, l: `${g.teacher} — ${g.program} — ${g.days} (${g.period})` })), sel, 'اختاري الحلقة');
+const groupOptions = (sel, excludeIds) => optList(activeGroups().filter((g) => !(excludeIds || []).includes(g.id)).sort((a, b) => (a.teacher + a.days).localeCompare(b.teacher + b.days, 'ar')).map((g) => ({ v: g.id, l: `${g.teacher} — ${g.days} (${g.period}) — ${groupTitle(g)}` })), sel, 'اختاري الحلقة');
 const waLink = (phone, text) => { let p = digits(phone); if (!p) return ''; if (p.length === 8) p = '973' + p; return 'https://wa.me/' + p + (text ? '?text=' + encodeURIComponent(text) : ''); };
 const initials = (n) => String(n || '?').trim().charAt(0);
 
@@ -282,7 +298,7 @@ function drawCharts(teachers, st, m) {
   const mk = (id, cfg) => { const c = document.getElementById(id); if (c) S.charts.push(new Chart(c, cfg)); };
   mk('ch-teachers', { type: 'bar', data: { labels: tNames, datasets: [{ label: 'الطالبات', data: tNames.map((t) => teachers[t].students), backgroundColor: '#14786bcc', borderRadius: 8 }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } } });
   const prog = {};
-  S.data.enrollments.forEach((e) => { if (e.status !== ES.ACTIVE) return; const g = S.idx.gr[e.groupId]; const s = S.idx.st[e.studentId]; if (g && s && s.status === 'نشطة') prog[g.program] = (prog[g.program] || 0) + 1; });
+  S.data.enrollments.forEach((e) => { if (e.status !== ES.ACTIVE) return; const g = S.idx.gr[e.groupId]; const s = S.idx.st[e.studentId]; if (g && s && s.status === 'نشطة') { const p = enrProg(e); prog[p] = (prog[p] || 0) + 1; } });
   mk('ch-programs', { type: 'doughnut', data: { labels: Object.keys(prog), datasets: [{ data: Object.values(prog), backgroundColor: palette, borderWidth: 2 }] }, options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, cutout: '62%' } });
   const rev = {};
   S.data.payments.forEach((p) => { if (p.status === 'فعالة') rev[p.fromMonth] = (rev[p.fromMonth] || 0) + (+p.amount || 0); });
@@ -297,12 +313,12 @@ function filteredStudents() {
   return S.data.students.filter((s) => {
     if (f.status && s.status !== f.status) return false;
     if (q) {
-      const hit = norm(s.name).includes(q) || (qd && ((s.phone || '').includes(qd) || (s.nationalId || '').includes(qd) || String(s.id) === qd || (s.phone2 || '').includes(qd)));
+      const hit = norm(s.name).includes(q) || (s.nationalId && norm(s.nationalId).includes(q)) || (qd && ((s.phone || '').includes(qd) || (s.nationalId || '').includes(qd) || String(s.id) === qd || (s.phone2 || '').includes(qd)));
       if (!hit) return false;
     }
     if (f.teacher || f.program || f.days || f.period) {
       const en = f.status === 'مؤرشفة' ? (S.idx.enrBySt[s.id] || []).filter((e) => e.status === ES.SUSPENDED) : activeEnr(s.id);
-      const ok = en.some((e) => { const g = S.idx.gr[e.groupId]; return g && (!f.teacher || g.teacher === f.teacher) && (!f.program || g.program === f.program) && (!f.days || g.days === f.days) && (!f.period || g.period === f.period); });
+      const ok = en.some((e) => { const g = S.idx.gr[e.groupId]; return g && (!f.teacher || g.teacher === f.teacher) && (!f.program || enrProg(e) === f.program) && (!f.days || g.days === f.days) && (!f.period || g.period === f.period); });
       if (!ok) return false;
     }
     if (f.pay) { const ps = payStatus(s, m); if (f.pay === 'unpaid' ? !(ps === 'unpaid' || ps === 'partial') : ps !== f.pay) return false; }
@@ -311,7 +327,7 @@ function filteredStudents() {
 }
 function studentRow(s) {
   const en = s.status === 'نشطة' ? activeEnr(s.id) : (S.idx.enrBySt[s.id] || []).filter((e) => e.status === ES.SUSPENDED);
-  const tags = en.map((e) => { const g = S.idx.gr[e.groupId]; return g ? `<span class="chip">👩‍🏫 ${esc(g.teacher)} · ${esc(g.program)}</span>${periodChip(g.period)}` : ''; }).join('') || '<span class="muted small">غير مسجلة في حلقة</span>';
+  const tags = en.map((e) => { const g = S.idx.gr[e.groupId]; return g ? `<span class="chip">👩‍🏫 ${esc(g.teacher)} · ${esc(enrProg(e))}</span>${periodChip(g.period)}` : ''; }).join('') || '<span class="muted small">غير مسجلة في حلقة</span>';
   return `<div class="row-card ${s.status !== 'نشطة' ? 'archived' : ''}" data-sid="${esc(s.id)}">
     <div class="rc-main"><div class="avatar">${esc(initials(s.name))}</div><div style="min-width:0"><div class="rc-title">${esc(s.name)}</div><div class="rc-sub"><span class="num">#${esc(s.id)}</span>${s.phone ? ' · <span class="num">' + esc(s.phone) + '</span>' : ''}</div></div></div>
     <div class="rc-tags">${tags}</div>
@@ -321,7 +337,7 @@ function renderStudents(el) {
   const L = S.data.lists, f = S.f;
   el.innerHTML = `
     <div class="toolbar">
-      <div class="search"><input class="input" id="st-q" placeholder="ابحثي بالاسم أو الهاتف أو الرقم الشخصي..." value="${esc(f.q)}" autocomplete="off"/></div>
+      <div class="search"><input class="input" id="st-q" placeholder="ابحثي بالاسم أو الهاتف أو اسم المستخدم..." value="${esc(f.q)}" autocomplete="off"/></div>
       <button class="btn primary" id="st-add">＋ إضافة طالبة</button>
       <button class="btn" id="st-export" title="تصدير Excel">⬇️ تصدير</button>
     </div>
@@ -375,7 +391,7 @@ function openStudent(id, tab) {
       <div class="kv">
         <div><small>الهاتف</small><b class="num">${esc(s.phone || '—')}</b></div>
         <div><small>هاتف إضافي</small><b class="num">${esc(s.phone2 || '—')}</b></div>
-        <div><small>الرقم الشخصي</small><b class="num">${esc(s.nationalId || '—')}</b></div>
+        <div><small>اسم المستخدم</small><b class="num">${esc(s.nationalId || '—')}</b></div>
         <div><small>حالة الرسوم</small><b>${esc(s.feeStatus || 'عادية')}</b></div>
         <div style="grid-column:1/-1"><small>ملاحظات</small><b>${esc(s.notes || '—')}</b></div>
         <div><small>أُضيفت</small><b class="small">${esc(s.createdBy)} · ${esc(s.createdAt)}</b></div>
@@ -384,12 +400,12 @@ function openStudent(id, tab) {
       ${family.length ? `<div class="section-title">👨‍👩‍👧 من نفس الأسرة</div><div class="rc-tags">${family.map((x) => `<button class="chip" data-open="${esc(x.id)}" style="border:none;cursor:pointer">${esc(x.name)}</button>`).join('')}</div>` : ''}
     </div>
     <div data-pane="groups" ${tab !== 'groups' ? 'hidden' : ''}>
-      ${all.length ? all.map((e) => { const g = S.idx.gr[e.groupId]; const on = e.status === ES.ACTIVE; return `<div class="item ${on ? '' : 'off'}"><div class="grow"><b>${esc(groupName(g))}</b><div class="small muted">${esc(groupWhen(g))} · ${esc(g ? g.time : '')}</div><div class="small muted">${esc(e.status)}${e.startDate ? ' · من ' + esc(e.startDate) : ''}${e.endDate ? ' إلى ' + esc(e.endDate) : ''}${e.notes ? ' · ' + esc(e.notes) : ''}</div></div>
-        ${on && !archived ? `<button class="btn sm soft" data-transfer="${esc(e.id)}">↔️ نقل</button><button class="btn sm danger-ghost" data-end="${esc(e.id)}">إنهاء</button>` : ''}${!on && !archived && e.status !== ES.SUSPENDED ? `<button class="btn sm" data-react="${esc(e.id)}">إعادة تفعيل</button>` : ''}</div>`; }).join('') : '<div class="empty">غير مسجلة في أي حلقة</div>'}
+      ${all.length ? all.map((e) => { const g = S.idx.gr[e.groupId]; const on = e.status === ES.ACTIVE; return `<div class="item ${on ? '' : 'off'}"><div class="grow"><b>${esc(enrName(e))}</b><div class="small muted">${esc(groupWhen(g))} · ${esc(g ? g.time : '')}</div><div class="small muted">${esc(e.status)}${e.startDate ? ' · من ' + esc(e.startDate) : ''}${e.endDate ? ' إلى ' + esc(e.endDate) : ''}${e.notes ? ' · ' + esc(e.notes) : ''}</div></div>
+        ${on && !archived ? `<button class="btn sm" data-prog="${esc(e.id)}">📖 البرنامج</button><button class="btn sm soft" data-transfer="${esc(e.id)}">↔️ نقل</button><button class="btn sm danger-ghost" data-end="${esc(e.id)}">إنهاء</button>` : ''}${!on && !archived && e.status !== ES.SUSPENDED ? `<button class="btn sm" data-react="${esc(e.id)}">إعادة تفعيل</button>` : ''}</div>`; }).join('') : '<div class="empty">غير مسجلة في أي حلقة</div>'}
       ${!archived ? '<button class="btn soft block" id="sd-enroll">＋ تسجيل في حلقة أخرى</button>' : ''}
     </div>
     <div data-pane="pay" ${tab !== 'pay' ? 'hidden' : ''}>
-      ${pays.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>الفترة</th><th>المبلغ</th><th>النوع</th><th>سجّلتها</th><th></th></tr></thead><tbody>${pays.map((p) => `<tr class="${p.status !== 'فعالة' ? 'cancelled' : ''}"><td>${esc(rangeLabel(p.fromMonth, p.toMonth))}${String(p.studentIds).includes(',') ? ' <span class="chip">عائلي</span>' : ''}${p.enrollmentId && S.idx.enr[p.enrollmentId] ? '<div class="small muted">' + esc(groupName(S.idx.gr[S.idx.enr[p.enrollmentId].groupId])) + '</div>' : ''}</td><td class="num"><b>${money(p.amount)}</b></td><td>${esc(p.type)}${p.method ? '<div class="small muted">' + esc(p.method) + '</div>' : ''}</td><td class="small">${esc(p.createdBy)}<div class="muted">${esc(p.paidDate || p.createdAt.slice(0, 10))}</div></td><td>${p.status === 'فعالة' ? (canDo('cancelPayment') ? `<button class="btn sm danger-ghost" data-cancelpay="${esc(p.id)}">إلغاء</button>` : '') : `<span class="small muted" title="${esc(p.cancelReason)}">ملغاة</span>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا توجد دفعات مسجلة</div>'}
+      ${pays.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>الفترة</th><th>المبلغ</th><th>النوع</th><th>سجّلتها</th><th></th></tr></thead><tbody>${pays.map((p) => `<tr class="${p.status !== 'فعالة' ? 'cancelled' : ''}"><td>${esc(rangeLabel(p.fromMonth, p.toMonth))}${String(p.studentIds).includes(',') ? ' <span class="chip">عائلي</span>' : ''}${p.enrollmentId && S.idx.enr[p.enrollmentId] ? '<div class="small muted">' + esc(enrName(S.idx.enr[p.enrollmentId])) + '</div>' : ''}</td><td class="num"><b>${money(p.amount)}</b></td><td>${esc(p.type)}${p.method ? '<div class="small muted">' + esc(p.method) + '</div>' : ''}</td><td class="small">${esc(p.createdBy)}<div class="muted">${esc(p.paidDate || p.createdAt.slice(0, 10))}</div></td><td>${p.status === 'فعالة' ? (canDo('cancelPayment') ? `<button class="btn sm danger-ghost" data-cancelpay="${esc(p.id)}">إلغاء</button>` : '') : `<span class="small muted" title="${esc(p.cancelReason)}">ملغاة</span>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا توجد دفعات مسجلة</div>'}
       ${!archived ? '<button class="btn primary block" id="sd-pay" style="margin-top:12px">＋ تسجيل دفعة</button>' : ''}
     </div>
     <div data-pane="log" ${tab !== 'log' ? 'hidden' : ''}><div id="sd-log" class="timeline"><div class="loading-screen" style="padding:20px"><div class="spinner"></div></div></div></div>`;
@@ -419,9 +435,10 @@ function openStudent(id, tab) {
     on('#sd-enroll', () => openEnrollForm(s, () => reopen('groups')));
     on('#sd-pay', () => openPaymentForm([s.id], () => reopen('pay')));
     $$('[data-transfer]', el).forEach((b) => { b.onclick = () => openTransferForm(S.idx.enr[b.dataset.transfer], () => reopen('groups')); });
+    $$('[data-prog]', el).forEach((b) => { b.onclick = () => changeProgram(S.idx.enr[b.dataset.prog], () => reopen('groups')); });
     $$('[data-end]', el).forEach((b) => { b.onclick = async () => {
       const e = S.idx.enr[b.dataset.end]; const g = S.idx.gr[e.groupId];
-      const reason = await confirmBox(`إنهاء تسجيل <b>${esc(s.name)}</b> في حلقة <b>${esc(groupName(g))}</b>؟`, { title: 'إنهاء تسجيل', danger: true, ok: 'إنهاء', input: 'السبب (اختياري)' });
+      const reason = await confirmBox(`إنهاء تسجيل <b>${esc(s.name)}</b> في حلقة <b>${esc(enrName(e))}</b>؟`, { title: 'إنهاء تسجيل', danger: true, ok: 'إنهاء', input: 'السبب (اختياري)' });
       if (reason === false) return;
       try { await mutate(null, 'endEnrollment', { enrollmentId: e.id, version: e.version, reason }, 'تم إنهاء التسجيل'); reopen('groups'); } catch (x) {}
     }; });
@@ -443,25 +460,27 @@ function openStudentForm(s) {
     <div class="grid2">
       <label class="field"><span>الهاتف</span><input name="phone" inputmode="tel" value="${esc(s.phone)}"/></label>
       <label class="field"><span>هاتف إضافي</span><input name="phone2" inputmode="tel" value="${esc(s.phone2)}"/></label>
-      <label class="field"><span>الرقم الشخصي</span><input name="nationalId" inputmode="numeric" value="${esc(s.nationalId)}"/></label>
+      <label class="field"><span>اسم المستخدم</span><input name="nationalId" autocomplete="off" value="${esc(s.nationalId)}"/></label>
       <label class="field"><span>حالة الرسوم</span><select name="feeStatus">${optList(S.data.constants.feeStatuses, s.feeStatus)}</select></label>
     </div>
     <label class="field"><span>رمز الأسرة <small class="muted">(لربط الأخوات والأم — افتراضياً رقم الهاتف)</small></span><input name="familyKey" value="${esc(s.familyKey)}"/></label>
     <label class="field"><span>ملاحظات</span><textarea name="notes">${esc(s.notes)}</textarea></label>
-    ${isNew ? `<div class="section-title" style="margin-top:4px">التسجيل في الحلقات</div><div id="sf-groups"></div><button type="button" class="btn sm soft" id="sf-addg">＋ حلقة أخرى</button>` : ''}
+    ${isNew ? `<div class="section-title" style="margin-top:4px">التسجيل في الحلقات</div><div id="sf-groups"></div>${progList()}<button type="button" class="btn sm soft" id="sf-addg">＋ حلقة أخرى</button>` : ''}
     <div id="sf-err" class="form-error" hidden style="margin-top:12px"></div></form>`;
   const m = openModal({ title: isNew ? 'إضافة طالبة جديدة' : 'تعديل بيانات: ' + esc(s.name), body,
     foot: `<button class="btn primary" id="sf-save">${isNew ? 'إضافة' : 'حفظ التعديلات'}</button><button class="btn" data-close>إلغاء</button>`,
     onMount: (el) => {
-      const addG = () => { const d = document.createElement('div'); d.style.cssText = 'display:flex;gap:6px;margin-bottom:8px'; d.innerHTML = `<select class="input" data-g>${groupOptions('')}</select><button type="button" class="icon-btn" title="إزالة">✕</button>`; d.querySelector('button').onclick = () => d.remove(); $('#sf-groups', el).appendChild(d); };
+      const addG = () => { const d = document.createElement('div'); d.style.cssText = 'display:flex;gap:6px;margin-bottom:8px'; d.innerHTML = `<select class="input" data-g style="flex:2">${groupOptions('')}</select><input class="input" data-gp list="dl-progs" placeholder="البرنامج" style="flex:1"/><button type="button" class="icon-btn" title="إزالة">✕</button>`; d.querySelector('button').onclick = () => d.remove(); const gs = d.querySelector('[data-g]'), gp = d.querySelector('[data-gp]'); gs.onchange = () => { const g = S.idx.gr[gs.value]; if (g && (!gp.value || gp.dataset.auto === '1')) { gp.value = g.program; gp.dataset.auto = '1'; } }; gp.oninput = () => { gp.dataset.auto = ''; }; $('#sf-groups', el).appendChild(d); };
       if (isNew) { addG(); $('#sf-addg', el).onclick = addG; }
       const save = async (force) => {
         const fd = new FormData($('#sf', el)); const st = Object.fromEntries(fd.entries());
         if (!st.name.trim()) { $('#sf-err', el).hidden = false; $('#sf-err', el).textContent = 'اسم الطالبة مطلوب'; return; }
         if (!isNew) { st.id = s.id; st.version = s.version; }
         const groupIds = isNew ? $$('[data-g]', el).map((x) => x.value).filter(Boolean) : [];
+        const groupPrograms = {};
+        if (isNew) $$('[data-g]', el).forEach((x) => { const gp = x.parentNode.querySelector('[data-gp]'); if (x.value) groupPrograms[x.value] = (gp && gp.value.trim()) || ((S.idx.gr[x.value] || {}).program || ''); });
         try {
-          const r = await mutate($('#sf-save', el), 'saveStudent', { student: st, groupIds, force }, isNew ? 'تمت إضافة الطالبة ✅' : (null));
+          const r = await mutate($('#sf-save', el), 'saveStudent', { student: st, groupIds, groupPrograms, force }, isNew ? 'تمت إضافة الطالبة ✅' : (null));
           m.close();
           if (!isNew) toast(r.unchanged ? 'لم يتغير شيء' : 'تم حفظ التعديلات ✅', r.unchanged ? '' : 'ok');
           openStudent(r.student.id);
@@ -482,17 +501,18 @@ function openStudentForm(s) {
 
 function openEnrollForm(s, after) {
   const current = activeEnr(s.id).map((e) => e.groupId);
-  const m = openModal({ title: 'تسجيل ' + esc(s.name) + ' في حلقة', body: `<label class="field"><span>الحلقة</span><select id="ef-g">${groupOptions('', current)}</select></label><label class="field"><span>تاريخ البداية</span><input type="date" id="ef-d" value="${todayStr()}"/></label>`,
+  const m = openModal({ title: 'تسجيل ' + esc(s.name) + ' في حلقة', body: `<label class="field"><span>الحلقة</span><select id="ef-g">${groupOptions('', current)}</select></label><label class="field"><span>البرنامج</span><input id="ef-p" list="dl-progs" placeholder="يُقترح حسب الحلقة"/></label>${progList()}<label class="field"><span>تاريخ البداية</span><input type="date" id="ef-d" value="${todayStr()}"/></label>`,
     foot: '<button class="btn primary" id="ef-save">تسجيل</button><button class="btn" data-close>إلغاء</button>',
-    onMount: (el) => { $('#ef-save', el).onclick = async () => { const gid = $('#ef-g', el).value; if (!gid) return toast('اختاري الحلقة', 'warn'); try { await mutate($('#ef-save', el), 'addEnrollment', { studentId: s.id, groupId: gid, startDate: $('#ef-d', el).value }, 'تم التسجيل ✅'); m.close(); after && after(); } catch (e) {} }; } });
+    onMount: (el) => { const ep = $('#ef-p', el); let auto = true; ep.oninput = () => { auto = false; }; $('#ef-g', el).onchange = () => { const g = S.idx.gr[$('#ef-g', el).value]; if (g && (auto || !ep.value)) { ep.value = g.program; auto = true; } }; $('#ef-save', el).onclick = async () => { const gid = $('#ef-g', el).value; if (!gid) return toast('اختاري الحلقة', 'warn'); if (!ep.value.trim()) return toast('اكتبي البرنامج', 'warn'); try { await mutate($('#ef-save', el), 'addEnrollment', { studentId: s.id, groupId: gid, program: ep.value.trim(), startDate: $('#ef-d', el).value }, 'تم التسجيل ✅'); m.close(); after && after(); } catch (e) {} }; } });
 }
 function openTransferForm(e, after) {
   const s = S.idx.st[e.studentId], g = S.idx.gr[e.groupId];
-  const m = openModal({ title: 'نقل ' + esc(s.name), body: `<div class="notice info">من: <b>${esc(groupName(g))}</b> — ${esc(groupWhen(g))}</div>
+  const m = openModal({ title: 'نقل ' + esc(s.name), body: `<div class="notice info">من: <b>${esc(enrName(e))}</b> — ${esc(groupWhen(g))}</div>
       <label class="field"><span>إلى الحلقة</span><select id="tf-g">${groupOptions('', [e.groupId])}</select></label>
+      <label class="field"><span>البرنامج</span><input id="tf-p" list="dl-progs" value="${esc(enrProg(e))}"/></label>${progList()}
       <div class="grid2"><label class="field"><span>تاريخ النقل</span><input type="date" id="tf-d" value="${todayStr()}"/></label><label class="field"><span>السبب (اختياري)</span><input id="tf-r"/></label></div>`,
     foot: '<button class="btn primary" id="tf-save">نقل</button><button class="btn" data-close>إلغاء</button>',
-    onMount: (el) => { $('#tf-save', el).onclick = async () => { const gid = $('#tf-g', el).value; if (!gid) return toast('اختاري الحلقة الجديدة', 'warn'); try { await mutate($('#tf-save', el), 'transferEnrollment', { enrollmentId: e.id, version: e.version, toGroupId: gid, date: $('#tf-d', el).value, reason: $('#tf-r', el).value }, 'تم النقل ✅'); m.close(); after && after(); } catch (x) {} }; } });
+    onMount: (el) => { $('#tf-save', el).onclick = async () => { const gid = $('#tf-g', el).value; if (!gid) return toast('اختاري الحلقة الجديدة', 'warn'); try { await mutate($('#tf-save', el), 'transferEnrollment', { enrollmentId: e.id, version: e.version, toGroupId: gid, program: $('#tf-p', el).value.trim(), date: $('#tf-d', el).value, reason: $('#tf-r', el).value }, 'تم النقل ✅'); m.close(); after && after(); } catch (x) {} }; } });
 }
 
 // ================= الحلقات =================
@@ -500,7 +520,7 @@ function renderGroups(el) {
   const gf = S.gf, L = S.data.lists;
   const showArch = gf.archived;
   const groups = S.data.groups.filter((g) => (showArch ? g.status !== 'فعالة' : g.status === 'فعالة') && (!gf.teacher || g.teacher === gf.teacher) && (!gf.period || g.period === gf.period))
-    .sort((a, b) => a.teacher.localeCompare(b.teacher, 'ar') || a.program.localeCompare(b.program, 'ar'));
+    .sort((a, b) => a.teacher.localeCompare(b.teacher, 'ar') || a.days.localeCompare(b.days, 'ar'));
   const byTeacher = {};
   groups.forEach((g) => { (byTeacher[g.teacher] = byTeacher[g.teacher] || []).push(g); });
   el.innerHTML = `<div class="toolbar"><div class="filters" style="margin:0;flex:1">
@@ -508,39 +528,47 @@ function renderGroups(el) {
       <select data-gf="period" class="${gf.period ? 'on' : ''}">${optList(S.data.constants.periods, gf.period, 'كل الفترات')}</select>
       <select data-gf="archived" class="${showArch ? 'on' : ''}">${optList([{ v: '', l: 'الحلقات الفعالة' }, { v: '1', l: 'الحلقات المؤرشفة' }], showArch ? '1' : '')}</select></div>
       <button class="btn primary" id="g-add">＋ حلقة جديدة</button></div>
+    ${!showArch && sameSlotClusters().length ? `<div class="notice warn">⚠️ توجد حلقات لنفس المعلمة في نفس الوقت: ${sameSlotClusters().map((c) => esc(c[0].teacher) + ' (' + c.map((g) => esc(g.id)).join(' + ') + ')').join('، ')}. يمكن دمج كل منها في حلقة واحدة مع بقاء برنامج كل طالبة أمام اسمها.${canDo('mergeGroups') ? ' <button class="btn sm primary" id="g-merge" style="margin-inline-start:8px">🔗 دمج الحلقات</button>' : ' (الدمج متاح للمشرفة)'}</div>` : ''}
     ${Object.keys(byTeacher).length ? Object.keys(byTeacher).map((t) => `<div class="section-title">👩‍🏫 ${esc(t)} <span class="muted">(${byTeacher[t].reduce((a, g) => a + groupActiveEnr(g.id).length, 0)} طالبة)</span></div>
       <div class="groups-grid">${byTeacher[t].map((g) => { const n = groupActiveEnr(g.id).length, cap = +g.capacity || 0; return `<div class="group-card" data-gid="${esc(g.id)}">
-        <div class="gc-top"><div><div class="gc-teacher">${esc(g.program)}</div><div class="small muted">${esc(g.days)}</div></div><div class="gc-count">${n}<small>${cap ? 'من ' + cap : 'طالبة'}</small></div></div>
+        <div class="gc-top"><div><div class="gc-teacher">${esc(groupTitle(g))}</div><div class="small muted">${esc(g.days)}</div>${groupProgs(g).length > 1 ? `<div class="small muted">${esc(groupProgsText(g))}</div>` : ''}</div><div class="gc-count">${n}<small>${cap ? 'من ' + cap : 'طالبة'}</small></div></div>
         <div class="rc-tags">${periodChip(g.period)}<span class="chip">🕒 ${esc(g.time || '—')}</span><span class="chip num">${esc(g.id)}</span></div>
         ${cap ? `<div class="progress"><i style="width:${Math.min(100, Math.round((n / cap) * 100))}%"></i></div>` : ''}</div>`; }).join('')}</div>`).join('') : '<div class="empty"><div class="big">📚</div>لا توجد حلقات</div>'}`;
   $$('[data-gf]', el).forEach((s) => { s.onchange = () => { gf[s.dataset.gf] = s.value; render(); }; });
   $('#g-add', el).onclick = () => openGroupForm();
+  if ($('#g-merge', el)) $('#g-merge', el).onclick = async () => {
+    const list = sameSlotClusters().map((c) => `<li><b>${esc(c[0].teacher)}</b> — ${esc(c[0].days)} ${esc(c[0].period)}: ${c.map((g) => esc(g.id) + ' ' + esc(groupTitle(g))).join(' + ')}</li>`).join('');
+    const ok = await confirmBox(`<ul style="margin:0 0 10px;padding-inline-start:18px">${list}</ul>كل مجموعة ستصبح حلقة واحدة (بأقدم رمز). برنامج كل طالبة يبقى محفوظاً أمام اسمها، والدفعات لا تتأثر، والحلقات المدموجة تُؤرشف.`, { title: '🔗 دمج الحلقات التي في نفس الوقت', ok: 'دمج' });
+    if (ok) mutate(null, 'mergeGroups', {}, 'تم دمج الحلقات ✅').catch(() => {});
+  };
   $$('[data-gid]', el).forEach((c) => { c.onclick = () => openGroup(c.dataset.gid); });
 }
 function openGroup(id) {
   const g = S.idx.gr[id]; if (!g) return;
-  const list = groupActiveEnr(id).map((e) => ({ e, s: S.idx.st[e.studentId] })).sort((a, b) => a.s.name.localeCompare(b.s.name, 'ar'));
-  const body = `<div class="kv" style="margin-bottom:14px"><div><small>المعلمة</small><b>${esc(g.teacher)}</b></div><div><small>البرنامج</small><b>${esc(g.program)}</b></div><div><small>الأيام والفترة</small><b>${esc(g.days)} · ${esc(g.period)}</b></div><div><small>الوقت</small><b>${esc(g.time || '—')}</b></div></div>
+  const list = groupActiveEnr(id).map((e) => ({ e, s: S.idx.st[e.studentId] })).sort((a, b) => enrProg(a.e).localeCompare(enrProg(b.e), 'ar') || a.s.name.localeCompare(b.s.name, 'ar'));
+  const body = `<div class="kv" style="margin-bottom:14px"><div><small>المعلمة</small><b>${esc(g.teacher)}</b></div><div><small>البرامج</small><b>${esc(groupProgsText(g))}</b></div><div><small>الأيام والفترة</small><b>${esc(g.days)} · ${esc(g.period)}</b></div><div><small>الوقت</small><b>${esc(g.time || '—')}</b></div></div>
     <div class="card-head"><h3>الطالبات (${list.length}${g.capacity ? ' من ' + esc(g.capacity) : ''})</h3><span class="spacer"></span><span class="small muted">السداد عن ${monthLabel(S.month)}</span></div>
-    ${list.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>#</th><th>الاسم</th><th>الهاتف</th><th>السداد</th><th></th></tr></thead><tbody>${list.map((x, i) => `<tr class="click" data-sid="${esc(x.s.id)}"><td>${i + 1}</td><td><b>${esc(x.s.name)}</b></td><td class="num">${esc(x.s.phone || '')}</td><td>${badge(payStatus(x.s, S.month))}</td><td><button class="btn sm soft" data-move="${esc(x.e.id)}">↔️ نقل</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا توجد طالبات في هذه الحلقة</div>'}
+    ${list.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>#</th><th>الاسم</th><th>البرنامج</th><th>الهاتف</th><th>السداد</th><th></th></tr></thead><tbody>${list.map((x, i) => `<tr class="click" data-sid="${esc(x.s.id)}"><td>${i + 1}</td><td><b>${esc(x.s.name)}</b></td><td><button class="chip" data-prog="${esc(x.e.id)}" style="border:none;cursor:pointer" title="تغيير البرنامج">${esc(enrProg(x.e))} ✏️</button></td><td class="num">${esc(x.s.phone || '')}</td><td>${badge(payStatus(x.s, S.month))}</td><td><button class="btn sm soft" data-move="${esc(x.e.id)}">↔️ نقل</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا توجد طالبات في هذه الحلقة</div>'}
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn soft" id="gd-addst">＋ إضافة طالبة موجودة</button><button class="btn soft" id="gd-new">＋ طالبة جديدة</button><button class="btn" id="gd-print">🖨️ طباعة الكشف</button></div>`;
   const m = openModal({ title: '📚 ' + esc(groupName(g)), size: 'lg', body,
     foot: `<button class="btn primary" id="gd-edit">✏️ تعديل الحلقة</button>${canDo('archiveGroup') ? `<button class="btn danger-ghost" id="gd-arch">${g.status === 'فعالة' ? 'أرشفة الحلقة' : 'استرجاع الحلقة'}</button>` : ''}`,
     onMount: (el) => {
       const reopen = () => { m.close(); openGroup(id); };
-      $$('tr[data-sid]', el).forEach((r) => { r.onclick = (ev) => { if (ev.target.closest('[data-move]')) return; m.close(); openStudent(r.dataset.sid, 'groups'); }; });
+      $$('tr[data-sid]', el).forEach((r) => { r.onclick = (ev) => { if (ev.target.closest('[data-move]') || ev.target.closest('[data-prog]')) return; m.close(); openStudent(r.dataset.sid, 'groups'); }; });
+      $$('[data-prog]', el).forEach((b) => { b.onclick = (ev) => { ev.stopPropagation(); changeProgram(S.idx.enr[b.dataset.prog], reopen); }; });
       $$('[data-move]', el).forEach((b) => { b.onclick = () => openTransferForm(S.idx.enr[b.dataset.move], reopen); });
       $('#gd-edit', el).onclick = () => { m.close(); openGroupForm(g); };
       $('#gd-print', el).onclick = () => printGroups([g]);
-      $('#gd-new', el).onclick = () => { m.close(); openStudentForm(); setTimeout(() => { const sel = $('[data-g]'); if (sel) sel.value = g.id; }, 30); };
+      $('#gd-new', el).onclick = () => { m.close(); openStudentForm(); setTimeout(() => { const sel = $('[data-g]'); if (sel) { sel.value = g.id; sel.dispatchEvent(new Event('change')); } }, 30); };
       $('#gd-addst', el).onclick = () => {
-        const pm = openModal({ title: 'إضافة طالبة إلى ' + esc(groupName(g)), body: '<div id="gp-picker"></div>', foot: '<button class="btn primary" id="gp-save">إضافة</button><button class="btn" data-close>إلغاء</button>',
+        const pm = openModal({ title: 'إضافة طالبة إلى ' + esc(groupName(g)), body: `<label class="field"><span>البرنامج</span><input id="gp-prog" list="dl-progs" value="${esc(g.program)}"/></label>${progList()}<div id="gp-picker"></div>`, foot: '<button class="btn primary" id="gp-save">إضافة</button><button class="btn" data-close>إلغاء</button>',
           onMount: (pel) => {
             const picker = studentPicker($('#gp-picker', pel), { multi: true, exclude: list.map((x) => x.s.id) });
             $('#gp-save', pel).onclick = async () => {
               const ids = picker.get(); if (!ids.length) return toast('اختاري طالبة', 'warn');
+              const prog = $('#gp-prog', pel).value.trim(); if (!prog) return toast('اكتبي البرنامج', 'warn');
               const btn = $('#gp-save', pel);
-              try { for (const sid of ids) { await withBusy(btn, () => api('addEnrollment', { studentId: sid, groupId: g.id })); } await loadData(true); render(); toast('تمت الإضافة ✅', 'ok'); pm.close(); reopen(); }
+              try { for (const sid of ids) { await withBusy(btn, () => api('addEnrollment', { studentId: sid, groupId: g.id, program: prog })); } await loadData(true); render(); toast('تمت الإضافة ✅', 'ok'); pm.close(); reopen(); }
               catch (e) { toast(e.message, 'err'); await loadData(true); render(); }
             };
           } });
@@ -558,7 +586,7 @@ function openGroupForm(g) {
   const body = `<form id="gf">
     <div class="grid2">
       <label class="field"><span>المعلمة *</span><input name="teacher" list="dl-t" required value="${esc(g.teacher)}"/></label>
-      <label class="field"><span>البرنامج *</span><input name="program" list="dl-p" required value="${esc(g.program)}"/></label>
+      <label class="field"><span>البرنامج الافتراضي *</span><input name="program" list="dl-p" required value="${esc(g.program)}"/></label>
       <label class="field"><span>الأيام *</span><input name="days" list="dl-d" required value="${esc(g.days)}"/></label>
       <label class="field"><span>الفترة *</span><select name="period">${optList(S.data.constants.periods, g.period)}</select></label>
       <label class="field"><span>الوقت</span><input name="time" placeholder="مثال: 4:00 م - 7:00 م" value="${esc(g.time)}"/></label>
@@ -566,7 +594,7 @@ function openGroupForm(g) {
     </div>
     <label class="field"><span>ملاحظات</span><input name="notes" value="${esc(g.notes)}"/></label>
     <datalist id="dl-t">${L.teachers.map((v) => `<option value="${esc(v)}">`).join('')}</datalist><datalist id="dl-p">${L.programs.map((v) => `<option value="${esc(v)}">`).join('')}</datalist><datalist id="dl-d">${L.days.map((v) => `<option value="${esc(v)}">`).join('')}</datalist>
-    <div class="notice info small">«مختلط» = مثل السبت صباحاً والخميس مساءً. اكتبي التفاصيل في خانة الوقت.</div>
+    <div class="notice info small">الحلقة = معلمة + أيام + فترة. يمكن أن تضم طالبات من برامج مختلفة في نفس الوقت، ويُحدَّد برنامج كل طالبة عند تسجيلها (البرنامج الافتراضي يُقترح تلقائياً).<br>«مختلط» = مثل السبت صباحاً والخميس مساءً. اكتبي التفاصيل في خانة الوقت.</div>
     <div id="gf-err" class="form-error" hidden></div></form>`;
   const m = openModal({ title: isNew ? 'حلقة جديدة' : 'تعديل الحلقة ' + esc(g.id), body, foot: `<button class="btn primary" id="gf-save">حفظ</button><button class="btn" data-close>إلغاء</button>`,
     onMount: (el) => {
@@ -682,7 +710,7 @@ function openPaymentForm(studentIds, after, month) {
         const ens = ids.length === 1 ? activeEnr(ids[0]) : [];
         const prevEnr = $('#pf-enr', el).value;
         $('#pf-enr-w', el).hidden = !(perEnr && ens.length > 1);
-        $('#pf-enr', el).innerHTML = optList(ens.map((e) => ({ v: e.id, l: groupName(S.idx.gr[e.groupId]) })), ens.some((e) => e.id === prevEnr) ? prevEnr : '', 'كل البرامج');
+        $('#pf-enr', el).innerHTML = optList(ens.map((e) => ({ v: e.id, l: enrName(e) })), ens.some((e) => e.id === prevEnr) ? prevEnr : '', 'كل البرامج');
         recalc();
       };
       // المبلغ الافتراضي: في نظام «رسوم لكل برنامج» يُضرب في عدد البرامج النشطة
@@ -743,7 +771,7 @@ function scheduleModel() {
 }
 function renderSchedule(el) {
   const model = scheduleModel();
-  const slot = (x) => `<div class="slot" data-gid="${esc(x.g.id)}"><b>${esc(x.g.teacher)}</b><span class="small">${esc(x.g.program)} · ${groupActiveEnr(x.g.id).length} طالبة</span>${x.label ? `<div class="small muted">${esc(x.label)}</div>` : ''}</div>`;
+  const slot = (x) => `<div class="slot" data-gid="${esc(x.g.id)}"><b>${esc(x.g.teacher)}</b><span class="small">${esc(groupTitle(x.g))} · ${groupActiveEnr(x.g.id).length} طالبة</span>${x.label ? `<div class="small muted">${esc(x.label)}</div>` : ''}</div>`;
   el.innerHTML = `<div class="toolbar"><span class="muted small">يتحدث تلقائياً من بيانات الحلقات</span><span class="spacer"></span><button class="btn" id="sc-print">🖨️ طباعة الجدول</button></div>
     <div class="card"><div class="sched"><div class="h">الأيام</div><div class="h">☀️ الفترة الصباحية</div><div class="h">🌙 الفترة المسائية</div>
     ${model.map((r) => `<div class="d">${esc(r.day)}</div><div class="c" data-label="☀️ صباحي">${r.cells['صباحي'].map(slot).join('') || '<span class="muted small">—</span>'}</div><div class="c" data-label="🌙 مسائي">${r.cells['مسائي'].map(slot).join('') || '<span class="muted small">—</span>'}</div>`).join('')}
@@ -760,26 +788,26 @@ function printHTML(html) {
 const pHead = (title, sub) => `<div class="p-head"><div><h1>${esc(settings().CENTER_NAME || '')}</h1><h2>${esc(title)}</h2></div><div class="small">${esc(sub || '')}<br>تاريخ الطباعة: ${todayStr()}</div></div>`;
 function printGroups(groups) {
   printHTML(groups.map((g) => {
-    const list = groupActiveEnr(g.id).map((e) => S.idx.st[e.studentId]).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+    const list = groupActiveEnr(g.id).map((e) => Object.assign({}, S.idx.st[e.studentId], { _prog: enrProg(e) })).sort((a, b) => a._prog.localeCompare(b._prog, 'ar') || a.name.localeCompare(b.name, 'ar'));
     return `<div class="p-page">${pHead('كشف أسماء الحلقة', settings().TERM_NAME)}
-      <div class="p-meta"><span><b>المعلمة:</b> ${esc(g.teacher)}</span><span><b>البرنامج:</b> ${esc(g.program)}</span><span><b>الأيام:</b> ${esc(g.days)} (${esc(g.period)})</span><span><b>الوقت:</b> ${esc(g.time)}</span><span><b>العدد:</b> ${list.length}</span></div>
-      <table class="p-tbl"><thead><tr><th style="width:30px">م</th><th>اسم الطالبة</th><th>الرقم الشخصي</th><th>الهاتف</th><th style="width:22%">ملاحظات</th></tr></thead><tbody>
-      ${list.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.name)}</td><td>${esc(s.nationalId)}</td><td>${esc(s.phone)}</td><td></td></tr>`).join('')}</tbody></table>
+      <div class="p-meta"><span><b>المعلمة:</b> ${esc(g.teacher)}</span><span><b>البرامج:</b> ${esc(groupProgsText(g))}</span><span><b>الأيام:</b> ${esc(g.days)} (${esc(g.period)})</span><span><b>الوقت:</b> ${esc(g.time)}</span><span><b>العدد:</b> ${list.length}</span></div>
+      <table class="p-tbl"><thead><tr><th style="width:30px">م</th><th>اسم الطالبة</th><th>البرنامج</th><th>اسم المستخدم</th><th>الهاتف</th><th style="width:18%">ملاحظات</th></tr></thead><tbody>
+      ${list.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.name)}</td><td>${esc(s._prog)}</td><td>${esc(s.nationalId)}</td><td>${esc(s.phone)}</td><td></td></tr>`).join('')}</tbody></table>
       <div class="p-foot"><span>توقيع المعلمة: ..................</span><span>توقيع الإدارة: ..................</span></div></div>`;
   }).join(''));
 }
 function printSchedule() {
   const model = scheduleModel();
-  const cell = (arr) => arr.map((x) => `<div><b>${esc(x.g.teacher)}</b> — ${esc(x.g.program)}${x.label ? ' (' + esc(x.label) + ')' : ''}</div>`).join('') || '—';
+  const cell = (arr) => arr.map((x) => `<div><b>${esc(x.g.teacher)}</b> — ${esc(groupTitle(x.g))}${x.label ? ' (' + esc(x.label) + ')' : ''}</div>`).join('') || '—';
   printHTML(`<div class="p-page">${pHead('جدول أوقات المركز', settings().TERM_NAME)}<table class="p-tbl"><thead><tr><th>الأيام</th><th>الفترة الصباحية</th><th>الفترة المسائية</th></tr></thead><tbody>${model.map((r) => `<tr><td><b>${esc(r.day)}</b></td><td>${cell(r.cells['صباحي'])}</td><td>${cell(r.cells['مسائي'])}</td></tr>`).join('')}</tbody></table></div>`);
 }
 function printUnpaid(m) {
   const list = S.data.students.filter((s) => { const p = payStatus(s, m); return p === 'unpaid' || p === 'partial'; }).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
-  printHTML(`<div class="p-page">${pHead('كشف غير المسددات — ' + monthLabel(m), list.length + ' طالبة')}<table class="p-tbl"><thead><tr><th>م</th><th>الاسم</th><th>الهاتف</th><th>الحلقة</th><th>ملاحظات</th></tr></thead><tbody>${list.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.name)}</td><td>${esc(s.phone)}</td><td>${activeEnr(s.id).map((e) => esc(groupName(S.idx.gr[e.groupId]))).join('<br>')}</td><td>${esc(s.notes)}</td></tr>`).join('')}</tbody></table></div>`);
+  printHTML(`<div class="p-page">${pHead('كشف غير المسددات — ' + monthLabel(m), list.length + ' طالبة')}<table class="p-tbl"><thead><tr><th>م</th><th>الاسم</th><th>الهاتف</th><th>الحلقة</th><th>ملاحظات</th></tr></thead><tbody>${list.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.name)}</td><td>${esc(s.phone)}</td><td>${activeEnr(s.id).map((e) => esc(enrName(e))).join('<br>')}</td><td>${esc(s.notes)}</td></tr>`).join('')}</tbody></table></div>`);
 }
 function printStats() {
   const st = computeStats(S.month);
-  const rows = activeGroups().sort((a, b) => a.teacher.localeCompare(b.teacher, 'ar')).map((g) => `<tr><td>${esc(g.teacher)}</td><td>${esc(g.program)}</td><td>${esc(g.days)} (${esc(g.period)})</td><td>${groupActiveEnr(g.id).length}</td></tr>`).join('');
+  const rows = activeGroups().sort((a, b) => a.teacher.localeCompare(b.teacher, 'ar')).map((g) => `<tr><td>${esc(g.teacher)}</td><td>${esc(groupProgsText(g))}</td><td>${esc(g.days)} (${esc(g.period)})</td><td>${groupActiveEnr(g.id).length}</td></tr>`).join('');
   printHTML(`<div class="p-page">${pHead('الإحصائية العامة للمركز', settings().TERM_NAME)}
     <table class="p-tbl" style="margin-bottom:14px"><tbody><tr><th>عدد الطالبات</th><td>${st.students}</td><th>عدد التسجيلات</th><td>${st.enrollments}</td></tr><tr><th>عدد الحلقات</th><td>${st.groups}</td><th>عدد المعلمات</th><td>${st.teachers}</td></tr><tr><th>إجمالي المحصّل</th><td>${money(st.totalCollected)}</td><th>محصّل الفصل الحالي</th><td>${money(st.termCollected)}</td></tr><tr><th>مسددات ${monthLabel(S.month)}</th><td>${st.paid}</td><th>غير مسددات</th><td>${st.unpaid + st.partial}</td></tr></tbody></table>
     <table class="p-tbl"><thead><tr><th>المعلمة</th><th>البرنامج</th><th>الأيام والفترة</th><th>عدد الطالبات</th></tr></thead><tbody>${rows}</tbody></table></div>`);
@@ -793,8 +821,8 @@ function downloadCSV(name, rows) {
 }
 function exportStudentsCSV(list) {
   const m = S.month;
-  downloadCSV('الطالبات-' + todayStr(), [['الرقم', 'الاسم', 'الرقم الشخصي', 'الهاتف', 'هاتف إضافي', 'الحلقات', 'حالة الرسوم', 'السداد ' + monthLabel(m), 'مجموع المدفوع', 'ملاحظات', 'الحالة']]
-    .concat(list.map((s) => [s.id, s.name, s.nationalId, s.phone, s.phone2, activeEnr(s.id).map((e) => { const g = S.idx.gr[e.groupId]; return g ? g.teacher + ' - ' + g.program + ' - ' + g.days + ' ' + g.period : ''; }).join(' | '), s.feeStatus, STATUS_LABEL[payStatus(s, m)],
+  downloadCSV('الطالبات-' + todayStr(), [['الرقم', 'الاسم', 'اسم المستخدم', 'الهاتف', 'هاتف إضافي', 'الحلقات', 'حالة الرسوم', 'السداد ' + monthLabel(m), 'مجموع المدفوع', 'ملاحظات', 'الحالة']]
+    .concat(list.map((s) => [s.id, s.name, s.nationalId, s.phone, s.phone2, activeEnr(s.id).map((e) => { const g = S.idx.gr[e.groupId]; return g ? g.teacher + ' - ' + enrProg(e) + ' - ' + g.days + ' ' + g.period : ''; }).join(' | '), s.feeStatus, STATUS_LABEL[payStatus(s, m)],
       (S.idx.payBySt[s.id] || []).filter((p) => p.status === 'فعالة').reduce((a, p) => a + (+p.amount || 0) / String(p.studentIds).split(',').length, 0), s.notes, s.status])));
 }
 function exportPaymentsCSV() {
