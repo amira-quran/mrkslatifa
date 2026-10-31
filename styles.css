@@ -237,3 +237,31 @@ table.tbl{width:100%;border-collapse:collapse;background:#fff;font-size:14px}
   .p-tbl th{background:#e3f1ee!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .p-foot{margin-top:24px;display:flex;justify-content:space-between;font-size:12px}
 }
+
+
+/* ===== جدول الحضور والغياب (الشاشة والطباعة) ===== */
+.att-grid-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+table.att-tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; text-align: center; }
+.att-tbl th, .att-tbl td { border: 1px solid #d5e0dc; padding: 7px 6px; vertical-align: middle; }
+.att-tbl thead tr.wk-row th { background: var(--primary); color: #fff; font-weight: 700; font-size: 13px; }
+.att-tbl thead tr.dy-row th { background: var(--primary-soft); color: var(--primary); font-weight: 700; font-size: 12px; line-height: 1.35; min-width: 54px; }
+.att-tbl td.st-name { text-align: right; font-weight: 600; white-space: nowrap; min-width: 175px; background: #fcfdfd; position: sticky; right: 0; z-index: 2; }
+.att-cell { cursor: pointer; user-select: none; font-weight: 700; font-size: 15px; width: 54px; height: 40px; transition: background .12s; }
+.att-cell:hover { background: #eef6f4; }
+.att-cell.st-غ { background: var(--danger-soft); color: var(--danger); }
+.att-cell.st-ع { background: var(--warn-soft); color: var(--warn); }
+.att-cell.st-ح { background: var(--ok-soft); color: var(--ok); }
+.att-legend { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: 13px; }
+.att-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.att-dot { width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; border: 1px solid var(--line); }
+
+@media print {
+  .p-att-title { text-align: center; background: #e3f1ee !important; border: 1.5px solid #0f5c52; padding: 8px 10px; border-radius: 8px; margin-bottom: 10px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .p-att-title h2 { margin: 0 0 4px; font-size: 15px; color: #0f5c52; }
+  .p-att-title div { font-size: 12px; color: #14231f; }
+  table.p-att-tbl { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .p-att-tbl th, .p-att-tbl td { border: 1px solid #444; padding: 4px 5px; text-align: center; }
+  .p-att-tbl td.right { text-align: right; font-weight: 600; }
+  .p-att-tbl tr.wk-head th { background: #0f5c52 !important; color: #fff !important; font-weight: 700; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .p-att-tbl tr.dy-head th { background: #e3f1ee !important; color: #0f5c52 !important; font-weight: 700; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

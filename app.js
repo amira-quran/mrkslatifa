@@ -64,6 +64,17 @@ function buildIndex() {
   d.groups.forEach((g) => { idx.gr[g.id] = g; });
   d.enrollments.forEach((e) => { idx.enr[e.id] = e; (idx.enrBySt[e.studentId] = idx.enrBySt[e.studentId] || []).push(e); (idx.enrByGr[e.groupId] = idx.enrByGr[e.groupId] || []).push(e); });
   d.payments.forEach((p) => String(p.studentIds).split(',').forEach((id) => { (idx.payBySt[id] = idx.payBySt[id] || []).push(p); }));
+  idx.attByGrMonth = {};
+  idx.attBySt = {};
+  idx.attMonths = {};
+  (d.attendance || []).forEach((a) => {
+    const gm = a.groupId + '|' + a.month;
+    (idx.attByGrMonth[gm] = idx.attByGrMonth[gm] || {})[a.studentId + '|' + a.date] = a;
+    (idx.attBySt[a.studentId] = idx.attBySt[a.studentId] || []).push(a);
+  });
+  (d.attMonths || []).forEach((am) => {
+    idx.attMonths[am.groupId + '|' + am.month] = am;
+  });
   S.idx = idx;
 }
 const activeEnr = (sid) => (S.idx.enrBySt[sid] || []).filter((e) => e.status === ES.ACTIVE);
@@ -213,6 +224,7 @@ const NAV = [
   { id: 'dashboard', ico: '📊', label: 'الرئيسية', bottom: true },
   { id: 'students', ico: '👩‍🎓', label: 'الطالبات', bottom: true },
   { id: 'groups', ico: '📚', label: 'الحلقات', bottom: true },
+  { id: 'attendance', ico: '✅', label: 'الحضور والغياب', bottom: true },
   { id: 'payments', ico: '💰', label: 'المدفوعات', bottom: true },
   { id: 'schedule', ico: '🗓️', label: 'جدول المركز' },
   { id: 'reports', ico: '🖨️', label: 'التقارير' },
@@ -549,7 +561,7 @@ function openGroup(id) {
   const body = `<div class="kv" style="margin-bottom:14px"><div><small>المعلمة</small><b>${esc(g.teacher)}</b></div><div><small>البرامج</small><b>${esc(groupProgsText(g))}</b></div><div><small>الأيام والفترة</small><b>${esc(g.days)} · ${esc(g.period)}</b></div><div><small>الوقت</small><b>${esc(g.time || '—')}</b></div></div>
     <div class="card-head"><h3>الطالبات (${list.length}${g.capacity ? ' من ' + esc(g.capacity) : ''})</h3><span class="spacer"></span><span class="small muted">السداد عن ${monthLabel(S.month)}</span></div>
     ${list.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>#</th><th>الاسم</th><th>البرنامج</th><th>الهاتف</th><th>السداد</th><th></th></tr></thead><tbody>${list.map((x, i) => `<tr class="click" data-sid="${esc(x.s.id)}"><td>${i + 1}</td><td><b>${esc(x.s.name)}</b></td><td><button class="chip" data-prog="${esc(x.e.id)}" style="border:none;cursor:pointer" title="تغيير البرنامج">${esc(enrProg(x.e))} ✏️</button></td><td class="num">${esc(x.s.phone || '')}</td><td>${badge(payStatus(x.s, S.month))}</td><td><button class="btn sm soft" data-move="${esc(x.e.id)}">↔️ نقل</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا توجد طالبات في هذه الحلقة</div>'}
-    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn soft" id="gd-addst">＋ إضافة طالبة موجودة</button><button class="btn soft" id="gd-new">＋ طالبة جديدة</button><button class="btn" id="gd-print">🖨️ طباعة الكشف</button></div>`;
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn soft" id="gd-addst">＋ إضافة طالبة موجودة</button><button class="btn soft" id="gd-new">＋ طالبة جديدة</button><button class="btn soft" id="gd-att">✅ سجل الحضور والغياب</button><button class="btn" id="gd-att-blank">🖨️ سجل حضور فارغ</button><button class="btn" id="gd-print">🖨️ طباعة الكشف</button></div>`;
   const m = openModal({ title: '📚 ' + esc(groupName(g)), size: 'lg', body,
     foot: `<button class="btn primary" id="gd-edit">✏️ تعديل الحلقة</button>${canDo('archiveGroup') ? `<button class="btn danger-ghost" id="gd-arch">${g.status === 'فعالة' ? 'أرشفة الحلقة' : 'استرجاع الحلقة'}</button>` : ''}`,
     onMount: (el) => {
@@ -559,6 +571,8 @@ function openGroup(id) {
       $$('[data-move]', el).forEach((b) => { b.onclick = () => openTransferForm(S.idx.enr[b.dataset.move], reopen); });
       $('#gd-edit', el).onclick = () => { m.close(); openGroupForm(g); };
       $('#gd-print', el).onclick = () => printGroups([g]);
+      if ($('#gd-att', el)) $('#gd-att', el).onclick = () => { m.close(); S.attGroup = g.id; S.attTab = 'sheet'; location.hash = '#/attendance'; };
+      if ($('#gd-att-blank', el)) $('#gd-att-blank', el).onclick = () => printAttendanceSheets([g], S.month, true);
       $('#gd-new', el).onclick = () => { m.close(); openStudentForm(); setTimeout(() => { const sel = $('[data-g]'); if (sel) { sel.value = g.id; sel.dispatchEvent(new Event('change')); } }, 30); };
       $('#gd-addst', el).onclick = () => {
         const pm = openModal({ title: 'إضافة طالبة إلى ' + esc(groupName(g)), body: `<label class="field"><span>البرنامج</span><input id="gp-prog" list="dl-progs" value="${esc(g.program)}"/></label>${progList()}<div id="gp-picker"></div>`, foot: '<button class="btn primary" id="gp-save">إضافة</button><button class="btn" data-close>إلغاء</button>',
@@ -832,12 +846,15 @@ function exportPaymentsCSV() {
 function renderReports(el) {
   const card = (ico, t, d, ctrl) => `<div class="card"><h3>${ico} ${t}</h3><p class="muted small" style="margin-top:-6px">${d}</p>${ctrl}</div>`;
   el.innerHTML = `<div class="groups-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">
+    ${card('✅', 'سجل الحضور والغياب الورقي (فارغ / معبأ)', 'سجل شهري مقسم بالأسابيع والتواريخ المختصرة لكل حلقة.', `<select class="input" id="rp-att-g" style="margin-bottom:6px"><option value="">كل الحلقات</option>${activeGroups().map((g) => `<option value="${esc(g.id)}">${esc(groupName(g))} — ${esc(g.days)} ${esc(g.period)}</option>`).join('')}</select><select class="input" id="rp-att-m" style="margin-bottom:8px">${monthOptions(S.month)}</select><div style="display:flex;gap:6px"><button class="btn primary" style="flex:1" id="rp-att-blank">🖨️ فارغ</button><button class="btn soft" style="flex:1" id="rp-att-filled">🖨️ معبأ</button></div>`)}
     ${card('📋', 'كشوف الحلقات (تقرير الوزارة)', 'كشف لكل حلقة في صفحة مستقلة مع خانات التوقيع.', `<select class="input" id="rp-g" style="margin-bottom:8px"><option value="">كل الحلقات</option>${activeGroups().map((g) => `<option value="${esc(g.id)}">${esc(groupName(g))} — ${esc(g.days)} ${esc(g.period)}</option>`).join('')}</select><button class="btn primary block" id="rp-groups">🖨️ طباعة</button>`)}
     ${card('🗓️', 'جدول أوقات المركز', 'الحلقات موزعة على الأيام والفترات.', '<button class="btn primary block" id="rp-sched">🖨️ طباعة</button>')}
     ${card('⏳', 'كشف غير المسددات', 'حسب الشهر المختار.', `<select class="input" id="rp-m" style="margin-bottom:8px">${monthOptions(S.month)}</select><button class="btn primary block" id="rp-unpaid">🖨️ طباعة</button>`)}
     ${card('📊', 'الإحصائية العامة', 'الأعداد والمبالغ وتوزيع الطالبات على الحلقات.', '<button class="btn primary block" id="rp-stats">🖨️ طباعة</button>')}
     ${card('⬇️', 'تصدير إلى Excel', 'ملفات CSV تفتح مباشرة في Excel أو Google Sheets.', '<button class="btn block" id="rp-xs" style="margin-bottom:8px">بيانات الطالبات</button><button class="btn block" id="rp-xp">سجل الدفعات</button>')}
   </div>`;
+  $('#rp-att-blank').onclick = () => { const id = $('#rp-att-g').value; const m = $('#rp-att-m').value; printAttendanceSheets(id ? [S.idx.gr[id]] : activeGroups().sort((a, b) => a.teacher.localeCompare(b.teacher, 'ar')), m, true); };
+  $('#rp-att-filled').onclick = () => { const id = $('#rp-att-g').value; const m = $('#rp-att-m').value; printAttendanceSheets(id ? [S.idx.gr[id]] : activeGroups().sort((a, b) => a.teacher.localeCompare(b.teacher, 'ar')), m, false); };
   $('#rp-groups').onclick = () => { const id = $('#rp-g').value; printGroups(id ? [S.idx.gr[id]] : activeGroups().sort((a, b) => a.teacher.localeCompare(b.teacher, 'ar'))); };
   $('#rp-sched').onclick = printSchedule;
   $('#rp-unpaid').onclick = () => printUnpaid($('#rp-m').value);
@@ -847,7 +864,7 @@ function renderReports(el) {
 }
 
 // ================= سجل التعديلات =================
-const ACTION_ICONS = { 'إضافة طالبة': '➕', 'تعديل بيانات طالبة': '✏️', 'حذف (أرشفة) طالبة': '🗑️', 'استرجاع طالبة': '♻️', 'حذف نهائي': '⛔', 'تسجيل في حلقة': '📚', 'نقل طالبة': '↔️', 'إنهاء تسجيل': '⏹️', 'إعادة تفعيل تسجيل': '▶️', 'تسجيل دفعة': '💵', 'إلغاء دفعة': '❌', 'إضافة حلقة': '🆕', 'تعديل حلقة': '🛠️', 'أرشفة حلقة': '📦', 'استرجاع حلقة': '📤', 'تسجيل دخول': '🔑', 'تغيير كلمة المرور': '🔒', 'تعديل إعداد': '⚙️', 'تعديل قائمة': '📃', 'إضافة إلى قائمة': '📃', 'حذف من قائمة': '📃', 'ترحيل البيانات': '🚚' };
+const ACTION_ICONS = { 'رصد حضور وغياب': '✅', 'إضافة طالبة': '➕', 'تعديل بيانات طالبة': '✏️', 'حذف (أرشفة) طالبة': '🗑️', 'استرجاع طالبة': '♻️', 'حذف نهائي': '⛔', 'تسجيل في حلقة': '📚', 'نقل طالبة': '↔️', 'إنهاء تسجيل': '⏹️', 'إعادة تفعيل تسجيل': '▶️', 'تسجيل دفعة': '💵', 'إلغاء دفعة': '❌', 'إضافة حلقة': '🆕', 'تعديل حلقة': '🛠️', 'أرشفة حلقة': '📦', 'استرجاع حلقة': '📤', 'تسجيل دخول': '🔑', 'تغيير كلمة المرور': '🔒', 'تعديل إعداد': '⚙️', 'تعديل قائمة': '📃', 'إضافة إلى قائمة': '📃', 'حذف من قائمة': '📃', 'ترحيل البيانات': '🚚' };
 function kvTable(o) {
   if (!o) return '';
   let obj; try { obj = typeof o === 'string' ? JSON.parse(o) : o; } catch (e) { return esc(o); }
@@ -935,10 +952,735 @@ function renderSettings(el) {
   };
 }
 
+
+// ================= نظام الحضور والغياب والإحصائيات =================
+const WEEK_ORDINALS = ['الأسبوع الأول', 'الأسبوع الثاني', 'الأسبوع الثالث', 'الأسبوع الرابع', 'الأسبوع الخامس', 'الأسبوع السادس'];
+const AR_DAY_NAMES = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+
+function parseGroupWeekdays(daysStr) {
+  const s = norm(daysStr || '');
+  const found = [];
+  const map = [
+    { d: 6, k: 'السبت' },
+    { d: 0, k: 'الاحد' },
+    { d: 1, k: 'الاثنين' },
+    { d: 2, k: 'الثلاثاء' },
+    { d: 3, k: 'الاربعاء' },
+    { d: 4, k: 'الخميس' },
+    { d: 5, k: 'الجمعه' },
+  ];
+  map.forEach((m) => { if (s.includes(m.k)) found.push(m.d); });
+  return found.length ? found : [0, 2];
+}
+
+function getGroupMonthSchedule(g, monthStr) {
+  if (!g || !monthStr) return { weeks: [], sessions: [] };
+  const [y, m] = String(monthStr).split('-').map(Number);
+  if (!y || !m) return { weeks: [], sessions: [] };
+  const targetDays = parseGroupWeekdays(g.days);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const sessions = [];
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dt = new Date(y, m - 1, d);
+    const dow = dt.getDay();
+    if (targetDays.includes(dow)) {
+      const iso = `${y}-${pad2(m)}-${pad2(d)}`;
+      sessions.push({
+        date: iso,
+        day: d,
+        month: m,
+        dow,
+        dayName: AR_DAY_NAMES[dow],
+        shortDate: `${d}/${m}`,
+      });
+    }
+  }
+
+  const perWeek = Math.max(1, targetDays.length);
+  const weeks = [];
+  for (let i = 0; i < sessions.length; i += perWeek) {
+    const chunk = sessions.slice(i, i + perWeek);
+    weeks.push({
+      index: weeks.length,
+      title: WEEK_ORDINALS[weeks.length] || ('الأسبوع ' + (weeks.length + 1)),
+      sessions: chunk,
+    });
+  }
+  return { weeks, sessions };
+}
+
+function getAttStatus(gid, monthStr, sid, dateStr) {
+  const map = (S.idx.attByGrMonth && S.idx.attByGrMonth[gid + '|' + monthStr]) || {};
+  const rec = map[sid + '|' + dateStr];
+  return rec ? rec.status : '';
+}
+function getAttNote(gid, monthStr, sid, dateStr) {
+  const map = (S.idx.attByGrMonth && S.idx.attByGrMonth[gid + '|' + monthStr]) || {};
+  const rec = map[sid + '|' + dateStr];
+  return rec ? (rec.notes || '') : '';
+}
+
+function printAttendanceSheets(groups, monthStr, isBlank, draftMap) {
+  if (!groups || !groups.length) return toast('لا توجد حلقات للطباعة', 'warn');
+  const mLabel = monthLabel(monthStr);
+  const centerName = settings().CENTER_NAME || 'المركز';
+
+  const pagesHTML = groups.map((g) => {
+    const sched = getGroupMonthSchedule(g, monthStr);
+    const students = groupActiveEnr(g.id)
+      .map((e) => ({ e, s: S.idx.st[e.studentId], prog: enrProg(e) }))
+      .sort((a, b) => a.prog.localeCompare(b.prog, 'ar') || a.s.name.localeCompare(b.s.name, 'ar'));
+
+    const multiProg = groupProgs(g).length > 1;
+    const weekHeaders = sched.weeks.map((w) => `<th colspan="${w.sessions.length}">${esc(w.title)}</th>`).join('');
+    const dayHeaders = sched.weeks.map((w) =>
+      w.sessions.map((s) => `<th>${esc(s.dayName)}<br><span class="num">${esc(s.shortDate)}</span></th>`).join('')
+    ).join('');
+
+    const rowsHTML = students.length ? students.map((item, idx) => {
+      let absCount = 0;
+      const cells = sched.sessions.map((ses) => {
+        if (isBlank) return '<td></td>';
+        const key = item.s.id + '|' + ses.date;
+        const st = draftMap && draftMap[key] !== undefined ? draftMap[key] : getAttStatus(g.id, monthStr, item.s.id, ses.date);
+        if (st === 'غ') absCount++;
+        const display = st === 'غ' ? '<b style="color:#c62828">غ</b>' : st === 'ع' ? '<b style="color:#b45309">ع</b>' : st === 'ح' ? '✓' : '';
+        return `<td>${display}</td>`;
+      }).join('');
+
+      return `<tr>
+        <td>${idx + 1}</td>
+        <td class="right">${esc(item.s.name)}</td>
+        ${multiProg ? `<td style="font-size:10.5px">${esc(item.prog)}</td>` : ''}
+        <td class="num" style="font-size:10.5px">${esc(item.s.phone || '')}</td>
+        ${cells}
+        <td>${isBlank ? '' : (absCount || '0')}</td>
+        <td></td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="${5 + sched.sessions.length + (multiProg ? 1 : 0)}">لا توجد طالبات مسجلات في هذه الحلقة</td></tr>`;
+
+    return `<div class="p-page">
+      <div class="p-head">
+        <div><h1>${esc(centerName)}</h1><h2>${isBlank ? 'سجل الحضور والغياب الورقي' : 'تقرير الحضور والغياب المسجل'}</h2></div>
+        <div class="small">${esc(settings().TERM_NAME || '')}<br>تاريخ الطباعة: ${todayStr()}</div>
+      </div>
+      <div class="p-att-title">
+        <h2>سجل الحضور والغياب لحلقة «${esc(groupTitle(g))}» — المعلمة: ${esc(g.teacher)} — لشهر ${esc(mLabel)}</h2>
+        <div><b>موعد الحلقة:</b> ${esc(g.days)} (${esc(g.period)}) ${g.time ? '· ' + esc(g.time) : ''} &nbsp;|&nbsp; <b>رمز الحلقة:</b> ${esc(g.id)} &nbsp;|&nbsp; <b>عدد الطالبات:</b> ${students.length}</div>
+      </div>
+      <table class="p-att-tbl">
+        <thead>
+          <tr class="wk-head">
+            <th rowspan="2" style="width:26px">م</th>
+            <th rowspan="2" style="min-width:155px">اسم الطالبة</th>
+            ${multiProg ? '<th rowspan="2">البرنامج</th>' : ''}
+            <th rowspan="2" style="width:72px">الهاتف</th>
+            ${weekHeaders}
+            <th rowspan="2" style="width:45px">إجمالي<br>الغياب</th>
+            <th rowspan="2" style="width:90px">ملاحظات</th>
+          </tr>
+          <tr class="dy-head">${dayHeaders}</tr>
+        </thead>
+        <tbody>${rowsHTML}</tbody>
+      </table>
+      <div class="p-foot">
+        <span>إرشاد: يوضع حرف (<b>غ</b>) للطالبة الغائبة وحرف (<b>ع</b>) للمعتذرة.</span>
+        <span>توقيع المعلمة: ........................</span>
+        <span>اعتماد الإدارة: ........................</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  printHTML(pagesHTML);
+}
+
+function computeAttendanceStats(monthsList, filterTeacher, filterGroupId, countMode) {
+  const groups = activeGroups().filter((g) =>
+    (!filterTeacher || g.teacher === filterTeacher) &&
+    (!filterGroupId || g.id === filterGroupId)
+  );
+  const todayIso = todayStr();
+  const groupStats = [];
+  const studentStatsMap = {};
+  const monthlyBreakdown = {};
+
+  monthsList.forEach((m) => {
+    monthlyBreakdown[m] = { month: m, label: monthLabel(m), expected: 0, absent: 0, excused: 0, present: 0 };
+  });
+
+  let totalExpected = 0, totalAbsent = 0, totalExcused = 0, totalPresent = 0;
+
+  groups.forEach((g) => {
+    const enrs = groupActiveEnr(g.id);
+    let gExpected = 0, gAbsent = 0, gExcused = 0, gSessionsCount = 0;
+
+    monthsList.forEach((m) => {
+      const sched = getGroupMonthSchedule(g, m);
+      const isMarked = !!(S.idx.attMonths && S.idx.attMonths[g.id + '|' + m]);
+      const map = (S.idx.attByGrMonth && S.idx.attByGrMonth[g.id + '|' + m]) || {};
+      const hasAnyRecord = isMarked || Object.keys(map).length > 0;
+
+      const activeSessions = sched.sessions.filter((ses) => {
+        if (countMode === 'all') return true;
+        if (countMode === 'recorded') return hasAnyRecord && (isMarked || Object.keys(map).some((k) => k.endsWith('|' + ses.date)));
+        return isMarked || ses.date <= todayIso;
+      });
+
+      gSessionsCount += activeSessions.length;
+
+      enrs.forEach((e) => {
+        const s = S.idx.st[e.studentId];
+        if (!s) return;
+        if (!studentStatsMap[s.id]) {
+          studentStatsMap[s.id] = {
+            student: s,
+            groups: [],
+            expected: 0,
+            present: 0,
+            absent: 0,
+            excused: 0,
+          };
+        }
+        const stItem = studentStatsMap[s.id];
+        const gLabel = g.teacher + ' (' + enrProg(e) + ')';
+        if (!stItem.groups.includes(gLabel)) stItem.groups.push(gLabel);
+
+        activeSessions.forEach((ses) => {
+          if (e.startDate && ses.date < e.startDate) return;
+          const rec = map[s.id + '|' + ses.date];
+          const status = rec ? rec.status : '';
+
+          gExpected++;
+          stItem.expected++;
+          monthlyBreakdown[m].expected++;
+
+          if (status === 'غ') {
+            gAbsent++;
+            stItem.absent++;
+            monthlyBreakdown[m].absent++;
+          } else if (status === 'ع') {
+            gExcused++;
+            stItem.excused++;
+            monthlyBreakdown[m].excused++;
+          } else {
+            stItem.present++;
+            monthlyBreakdown[m].present++;
+          }
+        });
+      });
+    });
+
+    const gPresent = Math.max(0, gExpected - gAbsent - gExcused);
+    const gRate = gExpected ? Math.round(((gPresent + gExcused) / gExpected) * 100) : 100;
+    totalExpected += gExpected;
+    totalAbsent += gAbsent;
+    totalExcused += gExcused;
+    totalPresent += gPresent;
+
+    groupStats.push({
+      group: g,
+      studentsCount: enrs.length,
+      sessionsCount: gSessionsCount,
+      expected: gExpected,
+      present: gPresent,
+      absent: gAbsent,
+      excused: gExcused,
+      rate: gRate,
+    });
+  });
+
+  const studentStats = Object.values(studentStatsMap).map((x) => {
+    x.rate = x.expected ? Math.round(((x.present + x.excused) / x.expected) * 100) : 100;
+    return x;
+  }).sort((a, b) => b.absent - a.absent || a.student.name.localeCompare(b.student.name, 'ar'));
+
+  const overallRate = totalExpected ? Math.round(((totalPresent + totalExcused) / totalExpected) * 100) : 100;
+
+  return {
+    totalExpected,
+    totalPresent,
+    totalAbsent,
+    totalExcused,
+    overallRate,
+    groupStats: groupStats.sort((a, b) => a.group.teacher.localeCompare(b.group.teacher, 'ar')),
+    studentStats,
+    monthlyBreakdown: Object.values(monthlyBreakdown),
+  };
+}
+
+function renderAttendance(el) {
+  const groups = activeGroups().sort((a, b) => a.teacher.localeCompare(b.teacher, 'ar'));
+  if (!groups.length) {
+    el.innerHTML = '<div class="empty"><div class="big">📚</div>لا توجد حلقات فعالة حالياً</div>';
+    return;
+  }
+  const tab = S.attTab || 'sheet';
+  if (!S.attGroup || !S.idx.gr[S.attGroup]) S.attGroup = groups[0].id;
+  if (!S.attMonth) S.attMonth = S.month || S.data.thisMonth;
+  if (!S.attClickMode) S.attClickMode = 'paper';
+
+  el.innerHTML = `
+    <div class="tabs">
+      <button data-atab="sheet" class="${tab === 'sheet' ? 'active' : ''}">📋 السجل الشهري وتفريغ الورقي</button>
+      <button data-atab="daily" class="${tab === 'daily' ? 'active' : ''}">📱 رصد حصة اليوم (إلكتروني)</button>
+      <button data-atab="stats" class="${tab === 'stats' ? 'active' : ''}">📊 الإحصائيات (شهرية / فصلية / سنوية)</button>
+    </div>
+    <div id="att-pane"></div>`;
+
+  $$('[data-atab]', el).forEach((b) => {
+    b.onclick = () => { S.attTab = b.dataset.atab; render(); };
+  });
+
+  const pane = $('#att-pane', el);
+  if (tab === 'sheet') renderAttMonthlySheet(pane, groups);
+  else if (tab === 'daily') renderAttDailySession(pane, groups);
+  else renderAttStatistics(pane, groups);
+}
+
+function renderAttMonthlySheet(pane, groups) {
+  const g = S.idx.gr[S.attGroup] || groups[0];
+  const m = S.attMonth;
+  const sched = getGroupMonthSchedule(g, m);
+  const students = groupActiveEnr(g.id)
+    .map((e) => ({ e, s: S.idx.st[e.studentId], prog: enrProg(e) }))
+    .sort((a, b) => a.prog.localeCompare(b.prog, 'ar') || a.s.name.localeCompare(b.s.name, 'ar'));
+
+  const isCompleted = !!(S.idx.attMonths && S.idx.attMonths[g.id + '|' + m]);
+
+  const draft = {};
+  students.forEach((item) => {
+    sched.sessions.forEach((ses) => {
+      draft[item.s.id + '|' + ses.date] = getAttStatus(g.id, m, item.s.id, ses.date);
+    });
+  });
+
+  const weekHeaders = sched.weeks.map((w) => `<th colspan="${w.sessions.length}">${esc(w.title)}</th>`).join('');
+  const dayHeaders = sched.weeks.map((w) =>
+    w.sessions.map((s) => `<th>${esc(s.dayName)}<br><span class="num">${esc(s.shortDate)}</span></th>`).join('')
+  ).join('');
+
+  pane.innerHTML = `
+    <div class="card">
+      <div class="toolbar">
+        <label class="field" style="margin:0;min-width:240px;flex:1">
+          <span>الحلقة</span>
+          <select id="att-g" class="input">${groups.map((x) => `<option value="${esc(x.id)}" ${x.id === g.id ? 'selected' : ''}>${esc(x.teacher)} — ${esc(groupTitle(x))} (${esc(x.days)} · ${esc(x.period)})</option>`).join('')}</select>
+        </label>
+        <label class="field" style="margin:0;min-width:160px">
+          <span>الشهر</span>
+          <select id="att-m" class="input">${monthOptions(m)}</select>
+        </label>
+        <label class="field" style="margin:0;min-width:210px">
+          <span>طريقة النقر في الجدول</span>
+          <select id="att-mode" class="input">
+            <option value="paper" ${S.attClickMode === 'paper' ? 'selected' : ''}>تفريغ ورقي سريع (نقرة = غ غائبة)</option>
+            <option value="cycle" ${S.attClickMode === 'cycle' ? 'selected' : ''}>تبديل شامل (غ ← ع ← ح ← فارغ)</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="toolbar" style="margin-top:8px">
+        <button class="btn" id="att-print-blank">🖨️ طباعة سجل ورقي فارغ (لهذه الحلقة)</button>
+        <button class="btn" id="att-print-all-blank">🖨️ طباعة سجل فارغ (لكل الحلقات)</button>
+        <button class="btn soft" id="att-print-filled">🖨️ طباعة السجل المعبأ</button>
+        <span class="spacer"></span>
+        <button class="btn primary" id="att-save">💾 حفظ واعتماد سجل الشهر</button>
+      </div>
+
+      <div class="notice ${isCompleted ? 'ok' : 'info'} small" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+        <div>
+          <b>سجل الحضور والغياب لحلقة «${esc(groupTitle(g))}» — المعلمة: ${esc(g.teacher)} — لشهر ${esc(monthLabel(m))}</b>
+          <div class="small">الموعد: ${esc(g.days)} (${esc(g.period)}) ${g.time ? '· ' + esc(g.time) : ''} | اضغطي على خلية التاريخ أمام الطالبة الغائبة لوضع علامة <b>«غ»</b>، ثم اضغطي «حفظ واعتماد سجل الشهر».</div>
+        </div>
+        <span class="badge ${isCompleted ? 'b-paid' : 'b-partial'}">${isCompleted ? '✅ تم رصد واعتماد هذا الشهر' : '⏳ لم يُعتمد بعد'}</span>
+      </div>
+
+      <div class="att-grid-wrap">
+        <table class="att-tbl" id="att-grid">
+          <thead>
+            <tr class="wk-row">
+              <th rowspan="2" style="width:36px">م</th>
+              <th rowspan="2" style="text-align:right;padding-right:12px">اسم الطالبة</th>
+              <th rowspan="2">البرنامج</th>
+              ${weekHeaders}
+              <th rowspan="2" style="width:70px">إجمالي<br>الغياب</th>
+              <th rowspan="2" style="width:75px">نسبة<br>الحضور</th>
+            </tr>
+            <tr class="dy-row">${dayHeaders}</tr>
+          </thead>
+          <tbody>
+            ${students.length ? students.map((item, idx) => `
+              <tr data-sid="${esc(item.s.id)}">
+                <td class="num">${idx + 1}</td>
+                <td class="st-name">${esc(item.s.name)}<div class="small muted num">${esc(item.s.phone || '')}</div></td>
+                <td class="small">${esc(item.prog)}</td>
+                ${sched.sessions.map((ses) => {
+                  const key = item.s.id + '|' + ses.date;
+                  const st = draft[key] || '';
+                  return `<td class="att-cell ${st ? 'st-' + st : ''}" data-key="${esc(key)}" data-sid="${esc(item.s.id)}" data-date="${esc(ses.date)}" title="${esc(item.s.name)} — ${esc(ses.dayName)} ${esc(ses.shortDate)}">${st === 'ح' ? '✓' : esc(st)}</td>`;
+                }).join('')}
+                <td class="num"><b data-abs-cnt="${esc(item.s.id)}">0</b></td>
+                <td class="num"><span class="badge b-paid" data-att-rate="${esc(item.s.id)}">100%</span></td>
+              </tr>
+            `).join('') : `<tr><td colspan="${5 + sched.sessions.length}" class="empty">لا توجد طالبات نشطات في هذه الحلقة</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="toolbar" style="margin-top:12px">
+        <div class="att-legend">
+          <span><i class="att-dot" style="background:var(--danger-soft);color:var(--danger)">غ</i> غائبة</span>
+          <span><i class="att-dot" style="background:var(--warn-soft);color:var(--warn)">ع</i> غائبة بعذر</span>
+          <span><i class="att-dot" style="background:var(--ok-soft);color:var(--ok)">✓</i> حاضرة</span>
+          <span class="muted small">(الخلية الفارغة بعد اعتماد الشهر تُحسب حضوراً كاملاً تلقائياً)</span>
+        </div>
+        <span class="spacer"></span>
+        <button class="btn sm ghost" id="att-clear-all">مسح علامات الشهر</button>
+      </div>
+    </div>`;
+
+  const updateRowTotals = (sid) => {
+    const totalSes = sched.sessions.length;
+    let abs = 0, exc = 0;
+    sched.sessions.forEach((ses) => {
+      const v = draft[sid + '|' + ses.date];
+      if (v === 'غ') abs++;
+      else if (v === 'ع') exc++;
+    });
+    const cntEl = pane.querySelector(`[data-abs-cnt="${sid}"]`);
+    const rateEl = pane.querySelector(`[data-att-rate="${sid}"]`);
+    if (cntEl) {
+      cntEl.textContent = abs + (exc ? ` (+${exc} ع)` : '');
+      cntEl.style.color = abs > 0 ? 'var(--danger)' : 'inherit';
+    }
+    if (rateEl) {
+      const rate = totalSes ? Math.round(((totalSes - abs) / totalSes) * 100) : 100;
+      rateEl.textContent = rate + '%';
+      rateEl.className = 'badge ' + (rate >= 85 ? 'b-paid' : rate >= 70 ? 'b-partial' : 'b-unpaid');
+    }
+  };
+  students.forEach((item) => updateRowTotals(item.s.id));
+
+  $('#att-g', pane).onchange = (e) => { S.attGroup = e.target.value; render(); };
+  $('#att-m', pane).onchange = (e) => { S.attMonth = e.target.value; render(); };
+  $('#att-mode', pane).onchange = (e) => { S.attClickMode = e.target.value; };
+
+  $$('.att-cell', pane).forEach((cell) => {
+    cell.onclick = () => {
+      const key = cell.dataset.key;
+      const sid = cell.dataset.sid;
+      const cur = draft[key] || '';
+      let next = '';
+      if (S.attClickMode === 'paper') {
+        next = cur === '' ? 'غ' : cur === 'غ' ? 'ع' : '';
+      } else {
+        next = cur === '' ? 'غ' : cur === 'غ' ? 'ع' : cur === 'ع' ? 'ح' : '';
+      }
+      draft[key] = next;
+      cell.className = 'att-cell' + (next ? ' st-' + next : '');
+      cell.textContent = next === 'ح' ? '✓' : next;
+      updateRowTotals(sid);
+    };
+  });
+
+  $('#att-clear-all', pane).onclick = async () => {
+    const ok = await confirmBox('هل تريدين تفريغ كل علامات الغياب على الشاشة لهذا الشهر؟ (لن يُحفظ المسح إلا بعد الضغط على زر الحفظ)', { title: 'مسح العلامات' });
+    if (!ok) return;
+    Object.keys(draft).forEach((k) => { draft[k] = ''; });
+    $$('.att-cell', pane).forEach((c) => { c.className = 'att-cell'; c.textContent = ''; });
+    students.forEach((item) => updateRowTotals(item.s.id));
+  };
+
+  $('#att-print-blank', pane).onclick = () => printAttendanceSheets([g], m, true);
+  $('#att-print-all-blank', pane).onclick = () => printAttendanceSheets(groups, m, true);
+  $('#att-print-filled', pane).onclick = () => printAttendanceSheets([g], m, false, draft);
+
+  $('#att-save', pane).onclick = async () => {
+    const records = Object.keys(draft).map((k) => {
+      const [studentId, date] = k.split('|');
+      return { studentId, date, status: draft[k] || '', notes: getAttNote(g.id, m, studentId, date) };
+    });
+    await mutate($('#att-save', pane), 'saveAttendanceBatch', {
+      groupId: g.id,
+      month: m,
+      records,
+      sessionsCount: sched.sessions.length,
+      markCompleted: true,
+    }, 'تم حفظ واعتماد سجل الحضور والغياب للشهر ✅');
+  };
+}
+
+function renderAttDailySession(pane, groups) {
+  const g = S.idx.gr[S.attGroup] || groups[0];
+  const m = S.attMonth;
+  const sched = getGroupMonthSchedule(g, m);
+  if (!S.attDate || !sched.sessions.some((s) => s.date === S.attDate)) {
+    const today = todayStr();
+    const match = sched.sessions.find((s) => s.date === today) || sched.sessions[sched.sessions.length - 1] || { date: today };
+    S.attDate = match.date;
+  }
+  const dateStr = S.attDate;
+  const students = groupActiveEnr(g.id)
+    .map((e) => ({ e, s: S.idx.st[e.studentId], prog: enrProg(e) }))
+    .sort((a, b) => a.s.name.localeCompare(b.s.name, 'ar'));
+
+  const dailyDraft = {};
+  students.forEach((item) => {
+    dailyDraft[item.s.id] = {
+      status: getAttStatus(g.id, m, item.s.id, dateStr) || 'ح',
+      notes: getAttNote(g.id, m, item.s.id, dateStr) || '',
+    };
+  });
+
+  pane.innerHTML = `
+    <div class="card">
+      <div class="toolbar">
+        <label class="field" style="margin:0;flex:1;min-width:220px">
+          <span>الحلقة</span>
+          <select id="ad-g" class="input">${groups.map((x) => `<option value="${esc(x.id)}" ${x.id === g.id ? 'selected' : ''}>${esc(x.teacher)} — ${esc(groupTitle(x))} (${esc(x.days)})</option>`).join('')}</select>
+        </label>
+        <label class="field" style="margin:0;min-width:150px">
+          <span>الشهر</span>
+          <select id="ad-m" class="input">${monthOptions(m)}</select>
+        </label>
+        <label class="field" style="margin:0;min-width:190px">
+          <span>تاريخ الحصة</span>
+          <select id="ad-d" class="input">
+            ${sched.sessions.map((s) => `<option value="${esc(s.date)}" ${s.date === dateStr ? 'selected' : ''}>${esc(s.dayName)} ${esc(s.shortDate)} (${esc(s.date)})</option>`).join('')}
+          </select>
+        </label>
+        <button class="btn primary" id="ad-save" style="align-self:flex-end">💾 حفظ حضور الحصة</button>
+      </div>
+
+      <div class="list" style="margin-top:12px">
+        ${students.length ? students.map((item, idx) => {
+          const cur = dailyDraft[item.s.id].status;
+          return `<div class="item" data-row-sid="${esc(item.s.id)}">
+            <div class="grow">
+              <b>${idx + 1}. ${esc(item.s.name)}</b>
+              <div class="small muted">${esc(item.prog)} ${item.s.phone ? '· ' + esc(item.s.phone) : ''}</div>
+            </div>
+            <div style="display:flex;gap:6px">
+              <button type="button" class="btn sm ${cur === 'ح' ? 'primary' : ''}" data-st-btn="ح" data-sid="${esc(item.s.id)}">✓ حاضرة</button>
+              <button type="button" class="btn sm ${cur === 'غ' ? 'danger' : ''}" data-st-btn="غ" data-sid="${esc(item.s.id)}">غ غائبة</button>
+              <button type="button" class="btn sm ${cur === 'ع' ? 'soft' : ''}" data-st-btn="ع" data-sid="${esc(item.s.id)}">ع بعذر</button>
+            </div>
+            <input class="input" data-note-sid="${esc(item.s.id)}" placeholder="ملاحظة (اختياري)" value="${esc(dailyDraft[item.s.id].notes)}" style="max-width:190px;min-height:34px;font-size:13px"/>
+          </div>`;
+        }).join('') : '<div class="empty">لا توجد طالبات في هذه الحلقة</div>'}
+      </div>
+    </div>`;
+
+  $('#ad-g', pane).onchange = (e) => { S.attGroup = e.target.value; S.attDate = ''; render(); };
+  $('#ad-m', pane).onchange = (e) => { S.attMonth = e.target.value; S.attDate = ''; render(); };
+  $('#ad-d', pane).onchange = (e) => { S.attDate = e.target.value; render(); };
+
+  $$('[data-st-btn]', pane).forEach((btn) => {
+    btn.onclick = () => {
+      const sid = btn.dataset.sid;
+      const val = btn.dataset.stBtn;
+      dailyDraft[sid].status = val;
+      const row = pane.querySelector(`[data-row-sid="${sid}"]`);
+      $$('[data-st-btn]', row).forEach((b) => {
+        const v = b.dataset.stBtn;
+        b.className = 'btn sm ' + (v === val ? (v === 'ح' ? 'primary' : v === 'غ' ? 'danger' : 'soft') : '');
+      });
+    };
+  });
+
+  $('#ad-save', pane).onclick = async () => {
+    $$('[data-note-sid]', pane).forEach((inp) => {
+      dailyDraft[inp.dataset.noteSid].notes = inp.value.trim();
+    });
+    const records = Object.keys(dailyDraft).map((sid) => ({
+      studentId: sid,
+      date: dateStr,
+      status: dailyDraft[sid].status === 'ح' && !dailyDraft[sid].notes ? '' : dailyDraft[sid].status,
+      notes: dailyDraft[sid].notes,
+    }));
+    await mutate($('#ad-save', pane), 'saveSessionAttendance', {
+      groupId: g.id,
+      date: dateStr,
+      records,
+      sessionsCount: sched.sessions.length,
+    }, 'تم حفظ حضور الحصة بنجاح ✅');
+  };
+}
+
+function renderAttStatistics(pane, groups) {
+  const scope = S.attStatScope || 'monthly';
+  const m = S.attMonth || S.month || S.data.thisMonth;
+  const set = settings();
+  const yearStr = S.attYear || String(m).slice(0, 4);
+  const fTeacher = S.attStatTeacher || '';
+  const fGroup = S.attStatGroup || '';
+  const countMode = S.attCountMode || 'all';
+
+  let monthsList = [m];
+  let periodTitle = 'الإحصائية الشهرية — ' + monthLabel(m);
+  if (scope === 'term') {
+    const tf = set.TERM_FROM || (yearStr + '-09');
+    const tt = set.TERM_TO || (yearStr + '-12');
+    monthsList = [];
+    let cur = tf;
+    while (cur <= tt && monthsList.length < 12) { monthsList.push(cur); cur = addMonths(cur, 1); }
+    periodTitle = `الإحصائية الفصلية (${set.TERM_NAME || rangeLabel(tf, tt)})`;
+  } else if (scope === 'annual') {
+    monthsList = Array.from({ length: 12 }, (_, i) => `${yearStr}-${pad2(i + 1)}`);
+    periodTitle = `الإحصائية السنوية لعام ${yearStr}`;
+  }
+
+  const st = computeAttendanceStats(monthsList, fTeacher, fGroup, countMode);
+  const L = S.data.lists;
+
+  pane.innerHTML = `
+    <div class="card">
+      <div class="seg">
+        <label><input type="radio" name="att-sc" value="monthly" ${scope === 'monthly' ? 'checked' : ''}>📅 إحصائية شهرية</label>
+        <label><input type="radio" name="att-sc" value="term" ${scope === 'term' ? 'checked' : ''}>📚 إحصائية فصلية (${esc(set.TERM_NAME || 'الفصل')})</label>
+        <label><input type="radio" name="att-sc" value="annual" ${scope === 'annual' ? 'checked' : ''}>🗓️ إحصائية سنوية</label>
+      </div>
+
+      <div class="toolbar">
+        ${scope === 'monthly' ? `<select id="as-month" class="input" style="width:auto">${monthOptions(m)}</select>` : ''}
+        ${scope === 'annual' ? `<select id="as-year" class="input" style="width:auto">${[yearStr - 1, +yearStr, +yearStr + 1].map((y) => `<option value="${y}" ${String(y) === String(yearStr) ? 'selected' : ''}>سنة ${y}</option>`).join('')}</select>` : ''}
+        <select id="as-teacher" class="input" style="width:auto">${optList(L.teachers, fTeacher, 'كل المعلمات')}</select>
+        <select id="as-group" class="input" style="width:auto">${optList(groups.map((g) => ({ v: g.id, l: g.teacher + ' — ' + groupTitle(g) })), fGroup, 'كل الحلقات')}</select>
+        <select id="as-mode" class="input" style="width:auto">
+          <option value="all" ${countMode === 'all' ? 'selected' : ''}>حساب كامل حصص الشهر الجدولية</option>
+          <option value="smart" ${countMode === 'smart' ? 'selected' : ''}>حساب الحصص حتى تاريخ اليوم فقط</option>
+        </select>
+        <span class="spacer"></span>
+        <button class="btn" id="as-print">🖨️ طباعة الإحصائية</button>
+        <button class="btn" id="as-csv">⬇️ تصدير Excel</button>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><span class="ic">✅</span><div class="lbl">نسبة الحضور العامة</div><div class="val">${st.overallRate}%</div><div class="sub">${st.totalPresent} حضور من ${st.totalExpected} حصة</div></div>
+      <div class="stat red"><span class="ic">❌</span><div class="lbl">إجمالي الغياب (غ)</div><div class="val">${st.totalAbsent}</div><div class="sub">حالة غياب بدون عذر</div></div>
+      <div class="stat gold"><span class="ic">📝</span><div class="lbl">الغياب بعذر (ع)</div><div class="val">${st.totalExcused}</div><div class="sub">حالة اعتذار مسجلة</div></div>
+      <div class="stat blue"><span class="ic">👩‍🎓</span><div class="lbl">الطالبات المشمولات</div><div class="val">${st.studentStats.length}</div><div class="sub">في ${st.groupStats.length} حلقة</div></div>
+    </div>
+
+    ${scope !== 'monthly' ? `
+    <div class="card">
+      <h3>📆 مقارنة الحضور والغياب حسب الأشهر — ${esc(periodTitle)}</h3>
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead><tr><th>الشهر</th><th>إجمالي الحصص المقررة</th><th>الحضور</th><th>الغياب (غ)</th><th>بعذر (ع)</th><th>نسبة الانضباط</th></tr></thead>
+          <tbody>
+            ${st.monthlyBreakdown.map((mb) => {
+              const rate = mb.expected ? Math.round(((mb.present + mb.excused) / mb.expected) * 100) : 100;
+              return `<tr>
+                <td><b>${esc(mb.label)}</b></td>
+                <td class="num">${mb.expected}</td>
+                <td class="num">${mb.present}</td>
+                <td class="num" style="color:var(--danger);font-weight:700">${mb.absent}</td>
+                <td class="num">${mb.excused}</td>
+                <td><span class="badge ${rate >= 85 ? 'b-paid' : rate >= 70 ? 'b-partial' : 'b-unpaid'}">${rate}%</span></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>` : ''}
+
+    <div class="card">
+      <h3>📚 إحصائية الحضور والغياب حسب الحلقات</h3>
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead><tr><th>المعلمة</th><th>الحلقة / البرامج</th><th>الأيام</th><th>الطالبات</th><th>عدد الحصص</th><th>مرات الحضور</th><th>مرات الغياب (غ)</th><th>بعذر (ع)</th><th>نسبة الحضور</th></tr></thead>
+          <tbody>
+            ${st.groupStats.map((gs) => `
+              <tr class="click" data-open-att="${esc(gs.group.id)}">
+                <td><b>${esc(gs.group.teacher)}</b></td>
+                <td>${esc(groupTitle(gs.group))}</td>
+                <td class="small">${esc(gs.group.days)} (${esc(gs.group.period)})</td>
+                <td class="num">${gs.studentsCount}</td>
+                <td class="num">${gs.sessionsCount}</td>
+                <td class="num">${gs.present}</td>
+                <td class="num"><b style="color:${gs.absent ? 'var(--danger)' : 'inherit'}">${gs.absent}</b></td>
+                <td class="num">${gs.excused}</td>
+                <td><span class="badge ${gs.rate >= 85 ? 'b-paid' : gs.rate >= 70 ? 'b-partial' : 'b-unpaid'}">${gs.rate}%</span></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>👩‍🎓 سجل إحصائية الطالبات التفصيلي (${st.studentStats.length} طالبة)</h3>
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead><tr><th>#</th><th>اسم الطالبة</th><th>الحلقة</th><th>إجمالي الحصص</th><th>الحضور</th><th>الغياب (غ)</th><th>بعذر (ع)</th><th>نسبة الحضور</th><th>تنبيه واتساب</th></tr></thead>
+          <tbody>
+            ${st.studentStats.slice(0, 300).map((x, idx) => {
+              const msg = `السلام عليكم ورحمة الله، نفيدكم بأن الطالبة ${x.student.name} تغيبت (${x.absent}) مرات خلال ${periodTitle}. نرجو الحرص على انتظامها، شاكرين تعاونكم.`;
+              return `<tr>
+                <td class="num">${idx + 1}</td>
+                <td><b>${esc(x.student.name)}</b></td>
+                <td class="small">${esc(x.groups.join(' | '))}</td>
+                <td class="num">${x.expected}</td>
+                <td class="num">${x.present}</td>
+                <td class="num"><b style="color:${x.absent ? 'var(--danger)' : 'inherit'}">${x.absent}</b></td>
+                <td class="num">${x.excused}</td>
+                <td><span class="badge ${x.rate >= 85 ? 'b-paid' : x.rate >= 70 ? 'b-partial' : 'b-unpaid'}">${x.rate}%</span></td>
+                <td>${x.absent > 0 && x.student.phone ? `<a class="btn sm soft" target="_blank" rel="noopener" href="${esc(waLink(x.student.phone, msg))}">💬 تنبيه</a>` : '—'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+  $$('[name="att-sc"]', pane).forEach((r) => { r.onchange = () => { S.attStatScope = r.value; render(); }; });
+  if ($('#as-month', pane)) $('#as-month', pane).onchange = (e) => { S.attMonth = e.target.value; render(); };
+  if ($('#as-year', pane)) $('#as-year', pane).onchange = (e) => { S.attYear = e.target.value; render(); };
+  $('#as-teacher', pane).onchange = (e) => { S.attStatTeacher = e.target.value; render(); };
+  $('#as-group', pane).onchange = (e) => { S.attStatGroup = e.target.value; render(); };
+  $('#as-mode', pane).onchange = (e) => { S.attCountMode = e.target.value; render(); };
+
+  $$('[data-open-att]', pane).forEach((row) => {
+    row.onclick = () => { S.attGroup = row.dataset.openAtt; S.attTab = 'sheet'; render(); };
+  });
+
+  $('#as-print', pane).onclick = () => {
+    printHTML(`<div class="p-page">
+      ${pHead(periodTitle, 'نسبة الحضور العامة: ' + st.overallRate + '%')}
+      <table class="p-tbl" style="margin-bottom:12px">
+        <tbody>
+          <tr><th>إجمالي الحصص المقررة</th><td>${st.totalExpected}</td><th>إجمالي الحضور</th><td>${st.totalPresent}</td></tr>
+          <tr><th>إجمالي الغياب (غ)</th><td>${st.totalAbsent}</td><th>الغياب بعذر (ع)</th><td>${st.totalExcused}</td></tr>
+        </tbody>
+      </table>
+      <h3>أولاً: ملخص الحلقات</h3>
+      <table class="p-tbl" style="margin-bottom:14px">
+        <thead><tr><th>المعلمة</th><th>الحلقة</th><th>الطالبات</th><th>الحصص</th><th>الحضور</th><th>الغياب (غ)</th><th>بعذر (ع)</th><th>النسبة</th></tr></thead>
+        <tbody>${st.groupStats.map((gs) => `<tr><td>${esc(gs.group.teacher)}</td><td>${esc(groupTitle(gs.group))}</td><td>${gs.studentsCount}</td><td>${gs.sessionsCount}</td><td>${gs.present}</td><td>${gs.absent}</td><td>${gs.excused}</td><td>${gs.rate}%</td></tr>`).join('')}</tbody>
+      </table>
+      <h3>ثانياً: كشف حضور وغياب الطالبات</h3>
+      <table class="p-tbl">
+        <thead><tr><th>م</th><th>اسم الطالبة</th><th>الحلقة</th><th>الحصص</th><th>الحضور</th><th>الغياب (غ)</th><th>بعذر (ع)</th><th>نسبة الحضور</th></tr></thead>
+        <tbody>${st.studentStats.map((x, i) => `<tr><td>${i + 1}</td><td>${esc(x.student.name)}</td><td>${esc(x.groups.join(' | '))}</td><td>${x.expected}</td><td>${x.present}</td><td>${x.absent}</td><td>${x.excused}</td><td>${x.rate}%</td></tr>`).join('')}</tbody>
+      </table>
+    </div>`);
+  };
+
+  $('#as-csv', pane).onclick = () => {
+    downloadCSV('إحصائية-الحضور-والغياب-' + todayStr(), [
+      ['الرقم', 'اسم الطالبة', 'الهاتف', 'الحلقة', 'إجمالي الحصص', 'مرات الحضور', 'مرات الغياب (غ)', 'الغياب بعذر (ع)', 'نسبة الحضور %'],
+      ...st.studentStats.map((x) => [x.student.id, x.student.name, x.student.phone, x.groups.join(' | '), x.expected, x.present, x.absent, x.excused, x.rate + '%']),
+    ]);
+  };
+}
+
 const PAGES = {
   dashboard: { title: 'الرئيسية', render: renderDashboard },
   students: { title: 'الطالبات', render: renderStudents },
   groups: { title: 'الحلقات', render: renderGroups },
+  attendance: { title: 'الحضور والغياب والإحصائيات', render: renderAttendance },
   payments: { title: 'المدفوعات', render: renderPayments },
   schedule: { title: 'جدول المركز', render: renderSchedule },
   reports: { title: 'التقارير والطباعة', render: renderReports },
