@@ -417,7 +417,7 @@ function openStudent(id, tab) {
       ${!archived ? '<button class="btn soft block" id="sd-enroll">＋ تسجيل في حلقة أخرى</button>' : ''}
     </div>
     <div data-pane="pay" ${tab !== 'pay' ? 'hidden' : ''}>
-      ${pays.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>الفترة</th><th>المبلغ</th><th>النوع</th><th>سجّلتها</th><th></th></tr></thead><tbody>${pays.map((p) => `<tr class="${p.status !== 'فعالة' ? 'cancelled' : ''}"><td>${esc(rangeLabel(p.fromMonth, p.toMonth))}${String(p.studentIds).includes(',') ? ' <span class="chip">عائلي</span>' : ''}${p.enrollmentId && S.idx.enr[p.enrollmentId] ? '<div class="small muted">' + esc(enrName(S.idx.enr[p.enrollmentId])) + '</div>' : ''}</td><td class="num"><b>${money(p.amount)}</b></td><td>${esc(p.type)}${p.method ? '<div class="small muted">' + esc(p.method) + '</div>' : ''}</td><td class="small">${esc(p.createdBy)}<div class="muted">${esc(p.paidDate || p.createdAt.slice(0, 10))}</div></td><td>${p.status === 'فعالة' ? (canDo('cancelPayment') ? `<button class="btn sm danger-ghost" data-cancelpay="${esc(p.id)}">إلغاء</button>` : '') : `<span class="small muted" title="${esc(p.cancelReason)}">ملغاة</span>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا توجد دفعات مسجلة</div>'}
+      ${pays.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>الفترة</th><th>المبلغ</th><th>النوع</th><th>سجّلتها</th><th></th></tr></thead><tbody>${pays.map((p) => `<tr class="${p.status !== 'فعالة' ? 'cancelled' : ''}"><td>${esc(rangeLabel(p.fromMonth, p.toMonth))}${String(p.studentIds).includes(',') ? ' <span class="chip">عائلي</span>' : ''}${p.enrollmentId && S.idx.enr[p.enrollmentId] ? '<div class="small muted">' + esc(enrName(S.idx.enr[p.enrollmentId])) + '</div>' : ''}</td><td class="num"><b>${money(p.amount)}</b></td><td>${esc(p.type)}${p.method ? '<div class="small muted">' + esc(p.method) + '</div>' : ''}</td><td class="small">${esc(p.createdBy)}<div class="muted">${esc(p.paidDate || p.createdAt.slice(0, 10))}</div></td><td>${p.status === 'فعالة' ? (canDo('cancelPayment') ? `<div style="display:flex;gap:4px"><button class="btn sm" data-editpay="${esc(p.id)}">✏️ تعديل</button><button class="btn sm danger-ghost" data-cancelpay="${esc(p.id)}">🗑️ حذف</button></div>` : '') : `<span class="small muted" title="${esc(p.cancelReason)}">ملغاة</span>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا توجد دفعات مسجلة</div>'}
       ${!archived ? '<button class="btn primary block" id="sd-pay" style="margin-top:12px">＋ تسجيل دفعة</button>' : ''}
     </div>
     <div data-pane="log" ${tab !== 'log' ? 'hidden' : ''}><div id="sd-log" class="timeline"><div class="loading-screen" style="padding:20px"><div class="spinner"></div></div></div></div>`;
@@ -455,12 +455,8 @@ function openStudent(id, tab) {
       try { await mutate(null, 'endEnrollment', { enrollmentId: e.id, version: e.version, reason }, 'تم إنهاء التسجيل'); reopen('groups'); } catch (x) {}
     }; });
     $$('[data-react]', el).forEach((b) => { b.onclick = async () => { try { await mutate(b, 'reactivateEnrollment', { enrollmentId: b.dataset.react }, 'تم إعادة التفعيل'); reopen('groups'); } catch (x) {} }; });
-    $$('[data-cancelpay]', el).forEach((b) => { b.onclick = async () => {
-      const p = S.data.payments.find((x) => x.id === b.dataset.cancelpay);
-      const reason = await confirmBox(`إلغاء دفعة بمبلغ <b>${money(p.amount)}</b> عن ${esc(rangeLabel(p.fromMonth, p.toMonth))}؟`, { title: 'إلغاء دفعة', danger: true, ok: 'إلغاء الدفعة', cancel: 'تراجع', input: 'سبب الإلغاء', required: true });
-      if (!reason) return;
-      try { await mutate(null, 'cancelPayment', { id: p.id, version: p.version, reason }, 'تم إلغاء الدفعة'); reopen('pay'); } catch (x) {}
-    }; });
+    $$('[data-cancelpay]', el).forEach((b) => { b.onclick = () => cancelPaymentFlow(b.dataset.cancelpay, () => reopen('pay')); });
+    $$('[data-editpay]', el).forEach((b) => { b.onclick = () => { m.close(); openPaymentForm([], () => openStudent(id, 'pay'), null, b.dataset.editpay); }; });
   } });
 }
 
@@ -678,7 +674,7 @@ function renderPayments(el) {
   } else {
     body.innerHTML = pays.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>الطالبة</th><th>المبلغ</th><th>الفترة</th><th>النوع</th><th>سجّلتها</th><th></th></tr></thead><tbody>${pays.map((p) => {
       const names = String(p.studentIds).split(',').map((id) => S.idx.st[id] ? S.idx.st[id].name : '#' + id);
-      return `<tr class="${p.status !== 'فعالة' ? 'cancelled' : ''} click" data-sid="${esc(String(p.studentIds).split(',')[0])}"><td><b>${esc(names[0])}</b>${names.length > 1 ? `<div class="small muted">+ ${esc(names.slice(1).join('، '))}</div>` : ''}</td><td class="num"><b>${money(p.amount)}</b></td><td class="small">${esc(rangeLabel(p.fromMonth, p.toMonth))}</td><td>${esc(p.type)}</td><td class="small">${esc(p.createdBy)}<div class="muted">${esc(p.paidDate || '')}</div></td><td>${p.status === 'فعالة' ? '' : '<span class="small muted">ملغاة</span>'}</td></tr>`;
+      return `<tr class="${p.status !== 'فعالة' ? 'cancelled' : ''} click" data-sid="${esc(String(p.studentIds).split(',')[0])}"><td><b>${esc(names[0])}</b>${names.length > 1 ? `<div class="small muted">+ ${esc(names.slice(1).join('، '))}</div>` : ''}</td><td class="num"><b>${money(p.amount)}</b></td><td class="small">${esc(rangeLabel(p.fromMonth, p.toMonth))}</td><td>${esc(p.type)}</td><td class="small">${esc(p.createdBy)}<div class="muted">${esc(p.paidDate || '')}</div></td><td>${p.status === 'فعالة' ? (canDo('cancelPayment') ? `<div style="display:flex;gap:4px"><button class="btn sm" data-pedit="${esc(p.id)}">✏️ تعديل</button><button class="btn sm danger-ghost" data-pcancel="${esc(p.id)}">🗑️ حذف</button></div>` : '') : `<span class="small muted" title="${esc(p.cancelReason || '')}">ملغاة</span>`}</td></tr>`;
     }).join('')}</tbody></table></div>` : '<div class="empty">لا توجد دفعات تغطي هذا الشهر</div>';
   }
   $('#pm-month', el).onchange = (e) => { S.month = e.target.value; render(); };
@@ -686,10 +682,25 @@ function renderPayments(el) {
   $$('[data-pt]', el).forEach((b) => { b.onclick = () => { S.payTab = b.dataset.pt; render(); }; });
   $$('[data-quickpay]', el).forEach((b) => { b.onclick = (ev) => { ev.stopPropagation(); openPaymentForm([b.dataset.quickpay], null, m); }; });
   $$('[data-stop]', el).forEach((a) => { a.onclick = (ev) => ev.stopPropagation(); });
+  $$('[data-pedit]', el).forEach((b) => b.addEventListener('click', (ev) => { ev.stopPropagation(); openPaymentForm([], null, null, b.dataset.pedit); }));
+  $$('[data-pcancel]', el).forEach((b) => b.addEventListener('click', (ev) => { ev.stopPropagation(); cancelPaymentFlow(b.dataset.pcancel); }));
   $$('[data-sid]', body).forEach((r) => { r.onclick = (ev) => { if (ev.target.closest('[data-quickpay],[data-stop]')) return; openStudent(r.dataset.sid, 'pay'); }; });
 }
 
-function openPaymentForm(studentIds, after, month) {
+/** حذف دفعة = إلغاؤها مع سبب؛ تُستثنى من الحسابات وتبقى في سجل التعديلات */
+async function cancelPaymentFlow(pid, after) {
+  const p = S.data.payments.find((x) => x.id === pid);
+  if (!p) return toast('الدفعة غير موجودة', 'err');
+  const names = String(p.studentIds).split(',').map((id) => (S.idx.st[id] ? S.idx.st[id].name : '#' + id)).join('، ');
+  const reason = await confirmBox(`حذف دفعة بمبلغ <b>${money(p.amount)}</b> عن ${esc(rangeLabel(p.fromMonth, p.toMonth))} للطالبة <b>${esc(names)}</b>؟<br><span class="small muted">تُستثنى من الحسابات والإحصائيات وتبقى مسجلة في سجل التعديلات.</span>`, { title: 'حذف دفعة', danger: true, ok: 'حذف الدفعة', cancel: 'تراجع', input: 'سبب الحذف', required: true });
+  if (!reason) return;
+  try { await mutate(null, 'cancelPayment', { id: p.id, version: p.version, reason }, 'تم حذف الدفعة ✅'); after && after(); } catch (x) {}
+}
+
+function openPaymentForm(studentIds, after, month, editId) {
+  const editP = editId ? S.data.payments.find((x) => x.id === editId) : null;
+  if (editId && (!editP || editP.status !== 'فعالة')) { toast('هذه الدفعة غير موجودة أو ملغاة', 'err'); return; }
+  if (editP) { studentIds = String(editP.studentIds).split(','); month = editP.fromMonth; }
   const set = settings(), month0 = month || S.month;
   const perEnr = set.FEE_MODE === 'per_enrollment';
   const body = `<form id="pf">
@@ -709,7 +720,7 @@ function openPaymentForm(studentIds, after, month) {
     </div>
     <div id="pf-err" class="form-error" hidden></div></form>`;
   let picker;
-  const m = openModal({ title: '💵 تسجيل دفعة', body, foot: '<button class="btn primary" id="pf-save">حفظ الدفعة</button><button class="btn" data-close>إلغاء</button>',
+  const m = openModal({ title: editP ? '✏️ تعديل دفعة' : '💵 تسجيل دفعة', body, foot: `<button class="btn primary" id="pf-save">${editP ? 'حفظ التعديل' : 'حفظ الدفعة'}</button><button class="btn" data-close>إلغاء</button>`,
     onMount: (el) => {
       const f = $('#pf', el);
       let amountTouched = false;
@@ -743,6 +754,25 @@ function openPaymentForm(studentIds, after, month) {
       picker = studentPicker($('#pf-picker', el), { multi: true, initial: studentIds, onChange: () => sync() });
       $$('[name=mode]', f).forEach((r) => { r.onchange = sync; });
       sync();
+      if (editP) {
+        amountTouched = true;
+        const md0 = editP.fromMonth === editP.toMonth ? 'month' : (editP.fromMonth === set.TERM_FROM && editP.toMonth === set.TERM_TO ? 'term' : 'custom');
+        f.querySelector('[name=mode][value=' + md0 + ']').checked = true;
+        $('[name=fromMonth]', f).value = editP.fromMonth;
+        $('[name=toMonth]', f).value = editP.toMonth;
+        sync();
+        $('[name=amount]', f).value = editP.amount;
+        $('[name=paidDate]', f).value = editP.paidDate || todayStr();
+        const ms = $('[name=method]', f);
+        if (editP.method && ![].some.call(ms.options, (o) => o.value === editP.method)) ms.add(new Option(editP.method, editP.method));
+        ms.value = editP.method || ms.value;
+        $('[name=notes]', f).value = String(editP.notes || '').replace(/\s*\[تعديل للدفعة [^\]]*\]\s*$/, '');
+        if (editP.enrollmentId && !$('#pf-enr-w', el).hidden) $('#pf-enr', el).value = editP.enrollmentId;
+        const note = document.createElement('div');
+        note.className = 'notice info small';
+        note.textContent = 'عند الحفظ تُسجَّل الدفعة بالقيم الجديدة وتُلغى الدفعة القديمة تلقائياً، ويظهر ذلك في سجل التعديلات.';
+        f.prepend(note);
+      }
       const save = async (force) => {
         const fd = Object.fromEntries(new FormData(f).entries()), ids = picker.get(), md = mode();
         const err = (t) => { $('#pf-err', el).hidden = false; $('#pf-err', el).textContent = t; };
@@ -752,6 +782,22 @@ function openPaymentForm(studentIds, after, month) {
         if (md === 'term') { from = set.TERM_FROM; to = set.TERM_TO; }
         const type = ids.length > 1 ? 'عائلي' : md === 'term' ? 'فصلي' : md === 'month' ? 'شهري' : 'أخرى';
         const payload = { studentIds: ids, type, fromMonth: from, toMonth: to, amount: fd.amount, paidDate: fd.paidDate, method: fd.method, notes: fd.notes, enrollmentId: fd.enrollmentId || '', force };
+        if (editP) {
+          const cur = S.data.payments.find((x) => x.id === editP.id);
+          if (!cur || cur.status !== 'فعالة') return err('هذه الدفعة لم تعد فعالة (ربما عُدّلت من إدارية أخرى)');
+          payload.force = true;
+          payload.notes = ((fd.notes || '').trim() + ' [تعديل للدفعة ' + editP.id + ']').trim();
+          const btn = $('#pf-save', el);
+          try {
+            await withBusy(btn, async () => {
+              await api('addPayment', payload);
+              try { await api('cancelPayment', { id: cur.id, version: cur.version, reason: 'تعديل: استُبدلت بدفعة جديدة' }); }
+              catch (ce) { toast('أُضيفت الدفعة الجديدة لكن تعذّر إلغاء القديمة (' + ce.message + '). ألغي القديمة يدوياً حتى لا تتكرر.', 'warn', 9000); }
+            });
+            await loadData(true); render(); toast('تم تعديل الدفعة ✅', 'ok'); m.close(); after && after();
+          } catch (e) { await loadData(true).catch(() => {}); render(); err(e.message); }
+          return;
+        }
         try { await mutate($('#pf-save', el), 'addPayment', payload, 'تم تسجيل الدفعة ✅'); m.close(); after && after(); }
         catch (e) {
           if (e.code === 'DUPLICATE_PAYMENT') {
